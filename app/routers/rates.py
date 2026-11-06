@@ -297,6 +297,7 @@ async def import_csv(
 
     Las filas inválidas no abortan la importación: se informan en `rejected`/`rejected_sample`
     (`row` es el índice de fila de datos, desde 1, sin contar la cabecera).
+    Con `replace=true` cualquier fila rechazada aborta la importación con 422 sin escribir nada.
     """
     content = await _read_csv_text(file)
     reader = csv.DictReader(io.StringIO(content), dialect=sniff_dialect(content[:2048]))
@@ -314,6 +315,14 @@ async def import_csv(
         parsed = rows_to_ticks(reader, default_source=source, allowed_sources=REGISTRY)
     except csv.Error as e:
         raise HTTPException(422, f"CSV mal formado: {e}") from e
+
+    if replace and parsed.rejected:
+        # Una fila rechazada puede caer dentro del rango a reemplazar y se borraría sin sustituto.
+        raise HTTPException(422, {
+            "message": "Con `replace=true` no se admiten filas rechazadas; corrija el CSV. No se escribió nada.",
+            "rejected": len(parsed.rejected),
+            "rejected_sample": parsed.rejected[:IMPORT_REJECTED_SAMPLE],
+        })
 
     db = get_db()
     write = db.replace_ticks if replace else db.insert_ticks

@@ -197,3 +197,19 @@ def test_yadio_and_bcv_sources():
     b = asyncio.run(BCVSource().fetch(_client(handler)))
     assert y.price == 938.9 and y.ts == 1788954013
     assert b.price == 832.49 and b.ts == 1789099200
+
+
+def test_import_replace_with_rejected_rows_422_and_writes_nothing(client):
+    _import(client, "fecha,precio\n2020-01-01,1\n2020-01-02,2\n2020-01-03,3\n", source="bcv")
+    # la fila rechazada (01-02) cae dentro del rango [01-01, 01-03] de las aceptadas
+    r = _import(client, "fecha,precio\n2020-01-01,7\n2020-01-02,abc\n2020-01-03,9\n", source="bcv", replace="true")
+    assert r.status_code == 422
+    detail = r.json()["detail"]
+    assert detail["rejected"] == 1 and detail["rejected_sample"][0]["row"] == 2
+    rows = dbmod.get_db()._conn.execute("SELECT price FROM ticks WHERE source='bcv' AND ts < ? ORDER BY ts", (T0,)).fetchall()
+    assert [r[0] for r in rows] == [1, 2, 3]
+
+
+def test_import_without_replace_still_accepts_partial(client):
+    r = _import(client, "fecha,precio\n2020-01-01,7\n2020-01-02,abc\n", source="bcv")
+    assert r.status_code == 200 and (r.json()["inserted"], r.json()["rejected"]) == (1, 1)
