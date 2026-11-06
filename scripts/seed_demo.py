@@ -2,6 +2,7 @@
 
     python -m scripts.seed_demo            # escribe en RATES_DB_PATH
     python -m scripts.seed_demo --days 30
+    python -m scripts.seed_demo --force    # incluso si la BD ya tiene datos (rehúsa por defecto)
 """
 from __future__ import annotations
 
@@ -17,7 +18,13 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--days", type=int, default=730)
     ap.add_argument("--seed", type=int, default=7)
+    ap.add_argument("--force", action="store_true", help="escribir aunque la BD ya tenga datos")
     args = ap.parse_args()
+    if not args.force and get_db().sources():
+        raise SystemExit(
+            "La base de datos ya tiene datos: seed_demo mezclaría datos sintéticos con los reales. "
+            "Use --force si es lo que desea."
+        )
     rnd = random.Random(args.seed)
 
     now = int(time.time())

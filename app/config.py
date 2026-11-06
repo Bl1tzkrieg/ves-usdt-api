@@ -16,7 +16,7 @@ class Settings(BaseSettings):
 
     # Recolector en segundo plano
     collector_enabled: bool = True
-    collector_interval_seconds: int = 300  # cada 5 minutos
+    collector_interval_seconds: int = Field(300, ge=30)  # cada 5 minutos (mínimo 30 s)
     collector_sources: list[str] = Field(
         default_factory=lambda: ["binance_p2p", "yadio", "bcv", "paralelo"]
     )
@@ -25,8 +25,12 @@ class Settings(BaseSettings):
     # Binance P2P: cuántos anuncios usar para la mediana
     binance_rows: int = 10
 
-    # Límite blando de puntos en respuestas "raw" (0 = sin límite)
-    raw_max_points: int = 0
+    # Tope de puntos en respuestas "raw" (el cliente puede pedir menos, nunca más)
+    raw_max_points: int = 20_000
+
+    # Rango máximo consultable (días) y máximo de cubetas al rellenar huecos (fill != none)
+    max_range_days: int = 7300
+    max_fill_buckets: int = 100_000
 
     # Tamaño máximo del CSV subido a /import (bytes)
     import_max_bytes: int = 10_000_000

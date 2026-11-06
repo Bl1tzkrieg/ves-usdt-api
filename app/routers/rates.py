@@ -5,6 +5,7 @@ import asyncio
 import csv
 import io
 import json
+import re
 from datetime import date, datetime, timedelta
 from typing import AsyncIterator, Iterator
 
@@ -37,7 +38,7 @@ def _parse_when(raw: str | None, *, end: bool) -> int | None:
     """
     if raw is None or raw == "":
         return None
-    if raw.isdigit():
+    if raw.isascii() and raw.isdigit():
         return int(raw)
     try:
         d = date.fromisoformat(raw)
@@ -62,6 +63,8 @@ def _resolve_range(start: str | None, end: str | None, days: int | None) -> tupl
         ts_start = ts_end - (days or 30) * 86400
     if ts_start >= ts_end:
         raise HTTPException(422, "`start` debe ser anterior a `end`.")
+    if ts_end - ts_start > settings.max_range_days * 86400:
+        raise HTTPException(422, f"El rango máximo es de {settings.max_range_days} días.")
     return ts_start, ts_end
 
 
@@ -76,11 +79,16 @@ def _resolve_sources(raw: str | None) -> list[str]:
 def _build_series(source: str, ts_from: int, ts_to: int, interval: Interval, fill: Fill, max_points: int) -> list:
     db = get_db()
     if interval is Interval.raw:
-        ticks = agg.downsample(db.raw(source, ts_from, ts_to), max_points or settings.raw_max_points)
+        cap = min(max_points or settings.raw_max_points, settings.raw_max_points)
+        ticks = agg.downsample(db.raw(source, ts_from, ts_to), cap)
         return [
             {"t": t.ts, "date": agg.local_iso(t.ts), "price": t.price, "extra": t.extra} for t in ticks
         ]
     bucket = 3600 if interval is Interval.hour else 86400
+    if fill is not Fill.none and (ts_to - ts_from) // bucket > settings.max_fill_buckets:
+        raise HTTPException(
+            422, f"Rango demasiado grande para `fill={fill.value}`: máximo {settings.max_fill_buckets} cubetas."
+        )
     candles = agg.candles_from_buckets(db.buckets(source, ts_from, ts_to, bucket, agg.OFFSET_SECONDS))
     candles = agg.rollup(candles, interval) if interval in (Interval.week, Interval.month) else candles
     seed = None
@@ -128,11 +136,11 @@ async def latest(sources: str | None = Query(None, description="Lista separada p
 async def history(
     start: str | None = Query(None, description="Inicio: YYYY-MM-DD, ISO 8601 o epoch. Por defecto `end - days`."),
     end: str | None = Query(None, description="Fin (inclusivo si es fecha). Por defecto ahora."),
-    days: int | None = Query(None, ge=1, description="Alternativa a `start`: cantidad de días hacia atrás desde `end`. Sin tope."),
+    days: int | None = Query(None, ge=1, description="Alternativa a `start`: cantidad de días hacia atrás desde `end`. Máximo `max_range_days`."),
     sources: str | None = Query(None, description=f"Fuentes separadas por coma. Por defecto `{DEFAULT_SOURCE}`. Ej: binance_p2p,bcv"),
     interval: Interval = Query(Interval.day, description="raw | hour | day | week | month"),
     fill: Fill = Query(Fill.none, description="Relleno de cubetas vacías: none | forward | null"),
-    max_points: int = Query(0, ge=0, description="Solo interval=raw: reduce a ~N puntos para graficar (0 = todos)"),
+    max_points: int = Query(0, ge=0, description="Solo interval=raw: reduce a ~N puntos (0 = el tope del servidor, `raw_max_points`)"),
 ):
     ts_from, ts_to = _resolve_range(start, end, days)
     names = _resolve_sources(sources)
@@ -162,8 +170,8 @@ async def history_csv(
     value: Value = Query(Value.close, description="Solo layout=wide: qué valor de la vela usar por columna"),
     layout: str = Query("long", pattern="^(long|wide)$", description="long: una fila por fuente y fecha con OHLC. wide: una columna por fuente."),
     max_points: int = Query(0, ge=0),
-    sep: str = Query(",", max_length=1, description="Separador de columnas (use ';' para Excel en español)"),
-    decimal: str | None = Query(None, max_length=1, description="Separador decimal. Por defecto ',' si sep es ';', si no '.'"),
+    sep: str = Query(",", min_length=1, max_length=1, description="Separador de columnas (use ';' para Excel en español)"),
+    decimal: str | None = Query(None, min_length=1, max_length=1, description="Separador decimal. Por defecto ',' si sep es ';', si no '.'"),
     filename: str | None = None,
 ):
     dec = decimal or ("," if sep == ";" else ".")
@@ -220,7 +228,8 @@ async def history_csv(
         if pending:
             yield buf.getvalue()
 
-    name = filename or f"ves_rates_{interval.value}_{agg.to_local(ts_from).date()}_{agg.to_local(ts_to - 1).date()}.csv"
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", filename or "")[:120]
+    name = safe if re.search(r"[A-Za-z0-9]", safe) else f"ves_rates_{interval.value}_{agg.to_local(ts_from).date()}_{agg.to_local(ts_to - 1).date()}.csv"
     return StreamingResponse(
         rows(),
         media_type="text/csv; charset=utf-8",
@@ -257,11 +266,14 @@ async def stream(request: Request, sources: str | None = None, every: int = Quer
 @router.post("/collect", summary="Forzar una recolección inmediata de todas las fuentes",
              dependencies=[Depends(require_api_key)])
 async def collect_now():
+    before = collector.last_run
     try:
         ticks = await collector.collect_once()
     except CollectInProgress as e:
         raise HTTPException(409, str(e)) from e
-    return {"collected": [{"source": t.source, "price": t.price, "date": agg.local_iso(t.ts)} for t in ticks],
+    skipped = not ticks and collector.last_run == before  # corrida omitida por la separación mínima
+    return {"skipped": skipped,
+            "collected": [{"source": t.source, "price": t.price, "date": agg.local_iso(t.ts)} for t in ticks],
             "status": collector.last_status}
 
 

@@ -119,3 +119,8 @@ def test_concurrent_collect_raises_in_progress(monkeypatch):
         asyncio.run(scenario())
     finally:
         dbmod.set_db(None)
+
+
+@pytest.mark.parametrize("path", ["/api/v1/rates/latest", "/api/v1/rates/sources", "/api/v1/rates/collector", "/"])
+def test_read_paths_open_without_key(client, path):
+    assert TestClient(app).get(path).status_code == 200

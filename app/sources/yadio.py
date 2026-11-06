@@ -23,7 +23,7 @@ class YadioSource(RateSource):
         r.raise_for_status()
         data = r.json()
         if "rate" not in data:
-            raise SourceError(f"Yadio respondió sin 'rate': {data}")
+            raise SourceError(f"Yadio respondió sin 'rate': {str(data)[:200]}")
         # Yadio devuelve el timestamp de su última actualización en milisegundos
         ts = int(data.get("timestamp", self.now() * 1000)) // 1000
         return Tick(source=self.name, ts=ts, price=float(data["rate"]))

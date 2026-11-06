@@ -71,6 +71,8 @@ class Collector:
         while not self._stop.is_set():
             try:
                 await self.collect_once()
+            except CollectInProgress:
+                log.info("Recolección omitida: ya hay una en curso")
             except Exception:  # noqa: BLE001 — el recolector nunca debe morir
                 log.exception("Error inesperado en el recolector")
             try:
@@ -91,7 +93,7 @@ class Collector:
 
     def status(self) -> dict:
         return {
-            "enabled": self._task is not None,
+            "enabled": self._task is not None and not self._task.done(),
             "interval_seconds": self.interval,
             "sources": [s.name for s in self.sources],
             "last_run": self.last_run,

@@ -9,6 +9,7 @@ from datetime import datetime
 
 import httpx
 
+from ..aggregation import LOCAL_TZ
 from ..db import Tick
 from .base import RateSource, SourceError
 
@@ -24,16 +25,18 @@ class _DolarApiSource(RateSource):
         data = r.json()
         price = data.get("promedio")
         if price is None:
-            raise SourceError(f"DolarApi/{self.slug} sin 'promedio': {data}")
+            raise SourceError(f"DolarApi/{self.slug} sin 'promedio': {str(data)[:200]}")
         # Usamos la fecha de actualización de la fuente: el BCV publica una tasa por día hábil,
         # así que el UNIQUE(source, ts) evita duplicar el mismo valor cada 5 minutos.
-        ts = self.now()
+        # Una fecha ausente o inválida es un error: caer a now() duplicaría filas cada 5 minutos.
         raw = data.get("fechaActualizacion")
-        if raw:
-            try:
-                ts = int(datetime.fromisoformat(raw.replace("Z", "+00:00")).timestamp())
-            except ValueError:
-                pass
+        try:
+            dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        except ValueError as e:
+            raise SourceError(f"DolarApi/{self.slug} con 'fechaActualizacion' inválida: {str(raw)[:200]!r}") from e
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=LOCAL_TZ)
+        ts = int(dt.timestamp())
         return Tick(source=self.name, ts=ts, price=float(price), extra={"fecha": raw})
 
 

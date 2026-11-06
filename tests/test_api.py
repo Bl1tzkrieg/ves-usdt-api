@@ -63,8 +63,8 @@ def test_week_and_month_rollup(client):
     assert len(r.json()["series"][0]["points"]) == 1
 
 
-def test_no_range_limit(client):
-    r = client.get("/api/v1/rates/history", params={"start": "1990-01-01", "end": "2100-01-01", "sources": "binance_p2p"})
+def test_wide_range_within_limit(client):
+    r = client.get("/api/v1/rates/history", params={"start": "2010-01-01", "end": "2025-12-31", "sources": "binance_p2p"})
     assert r.status_code == 200 and len(r.json()["series"][0]["points"]) == 10
 
 
