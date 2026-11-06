@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     # Límite blando de puntos en respuestas "raw" (0 = sin límite)
     raw_max_points: int = 0
 
+    # Tamaño máximo del CSV subido a /import (bytes)
+    import_max_bytes: int = 10_000_000
+
     cors_origins: list[str] = Field(default_factory=lambda: ["*"])
 
 

@@ -37,89 +37,15 @@ import httpx
 from app.aggregation import LOCAL_TZ
 from app.db import Tick, get_db
 from app.sources import REGISTRY
+from app.tick_parsing import find_list, rows_to_ticks, sniff_dialect
 
-TS_KEYS = ("timestamp", "ts", "time", "t", "date", "fecha", "datetime", "last_update", "x")
-PRICE_KEYS = ("price", "rate", "close", "precio", "promedio", "value", "avg", "y")
-
-
-# ---------------------------------------------------------------- parsing tolerante
-
-def parse_ts(v: Any) -> int | None:
-    if v is None:
-        return None
-    if isinstance(v, (int, float)):
-        v = float(v)
-        return int(v / 1000) if v > 1e11 else int(v)  # ms vs s
-    s = str(v).strip()
-    if s.replace(".", "", 1).isdigit():
-        return parse_ts(float(s))
-    for fmt in ("%d-%m-%Y", "%d/%m/%Y", "%d-%m-%Y, %I:%M %p", "%d/%m/%Y, %I:%M %p"):
-        try:
-            return int(datetime.strptime(s, fmt).replace(tzinfo=LOCAL_TZ).timestamp())
-        except ValueError:
-            pass
-    try:
-        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=LOCAL_TZ)
-        return int(dt.timestamp())
-    except ValueError:
-        return None
-
-
-def parse_price(v: Any) -> float | None:
-    if v is None:
-        return None
-    if isinstance(v, (int, float)):
-        return float(v)
-    s = str(v).strip().replace("Bs", "").replace(" ", "")
-    if "," in s and "." in s:
-        s = s.replace(".", "").replace(",", ".")  # 1.234,56
-    else:
-        s = s.replace(",", ".")
-    try:
-        return float(s)
-    except ValueError:
-        return None
-
-
-def find_list(data: Any, list_key: str | None) -> list:
-    if list_key:
-        for part in list_key.split("."):
-            data = data[part]
-        return data
-    if isinstance(data, list):
-        return data
-    if isinstance(data, dict):
-        # primera lista "grande" que encontremos
-        for v in data.values():
-            if isinstance(v, list) and v:
-                return v
-        for v in data.values():
-            if isinstance(v, dict):
-                try:
-                    return find_list(v, None)
-                except ValueError:
-                    pass
-    raise ValueError("No encontré una lista de puntos; use --list-key")
 
 
 def to_ticks(items: Iterable[Any], source: str, ts_key: str | None, price_key: str | None) -> tuple[list[Tick], list[Any]]:
-    ticks, bad = [], []
-    for it in items:
-        ts = price = None
-        if isinstance(it, (list, tuple)) and len(it) >= 2:
-            ts, price = parse_ts(it[0]), parse_price(it[1])
-        elif isinstance(it, dict):
-            tk = ts_key or next((k for k in TS_KEYS if k in it), None)
-            pk = price_key or next((k for k in PRICE_KEYS if k in it), None)
-            ts = parse_ts(it.get(tk)) if tk else None
-            price = parse_price(it.get(pk)) if pk else None
-        if ts is None or price is None or price <= 0:
-            bad.append(it)
-            continue
-        ticks.append(Tick(source=source, ts=ts, price=price))
-    return ticks, bad
+    """Convierte puntos a ticks; devuelve también los puntos originales que no se pudieron interpretar."""
+    items = list(items)
+    parsed = rows_to_ticks(items, default_source=source, ts_key=ts_key, price_key=price_key, allowed_sources={source})
+    return parsed.ticks, [items[r["row"] - 1] for r in parsed.rejected]
 
 
 def save(ticks: list[Tick], source: str, dry: bool) -> None:
@@ -231,12 +157,7 @@ def cmd_csv(a: argparse.Namespace) -> None:
     with open(a.file, encoding="utf-8-sig", newline="") as f:
         sample = f.read(4096)
         f.seek(0)
-        try:
-            dialect = csv.Sniffer().sniff(sample, delimiters=",;\t")
-        except csv.Error:
-            dialect = csv.excel
-        rows = list(csv.DictReader(f, dialect=dialect))
-    rows = [{k.lower().strip(): v for k, v in r.items() if k} for r in rows]
+        rows = list(csv.DictReader(f, dialect=sniff_dialect(sample)))
     ticks, bad = to_ticks(rows, a.source, a.ts_key, a.price_key)
     if bad:
         print(f"{len(bad)} filas no interpretadas; ejemplo: {bad[0]}")

@@ -91,12 +91,71 @@ def test_validation_errors(client):
     assert client.get("/api/v1/rates/history", params={"sources": "nope"}).status_code == 422
 
 
+def _import(client, body, **params):
+    if isinstance(body, str):
+        body = body.encode()
+    return client.post("/api/v1/rates/import", params=params, files={"file": ("h.csv", body, "text/csv")})
+
+
 def test_import_csv(client):
-    body = "fecha;precio\n2020-01-01;5,5\n2020-01-02;6\n"
-    r = client.post("/api/v1/rates/import", params={"source": "bcv"}, files={"file": ("h.csv", body, "text/csv")})
-    assert r.json() == {"received": 2, "inserted": 2, "ignored": 0}
+    r = _import(client, "fecha;precio\n2020-01-01;5,5\n2020-01-02;6\n", source="bcv")
+    assert r.json() == {"received": 2, "inserted": 2, "duplicates": 0, "rejected": 0, "rejected_sample": []}
     r = client.get("/api/v1/rates/history", params={"start": "2020-01-01", "end": "2020-01-02", "sources": "bcv"})
     assert [p["close"] for p in r.json()["series"][0]["points"]] == [5.5, 6]
+    # reimportar: todo duplicado
+    r = _import(client, "fecha;precio\n2020-01-01;5,5\n2020-01-02;6\n", source="bcv")
+    assert (r.json()["inserted"], r.json()["duplicates"]) == (0, 2)
+
+
+def test_import_thousands_and_rejected_rows(client):
+    r = _import(client, "fecha;precio\n2020-01-01;1.234,56\n2020-01-02;abc\n", source="bcv")
+    assert r.status_code == 200
+    body = r.json()
+    assert (body["received"], body["inserted"], body["rejected"]) == (2, 1, 1)
+    assert body["rejected_sample"][0]["row"] == 2
+    assert get_price(client, "bcv", 1_577_851_200) == 1234.56
+
+
+def get_price(client, source, ts):
+    row = dbmod.get_db()._conn.execute("SELECT price FROM ticks WHERE source=? AND ts=?", (source, ts)).fetchone()
+    return row[0] if row else None
+
+
+def test_import_millisecond_timestamps_stored_as_seconds(client):
+    r = _import(client, "timestamp,price\n1577851200000,10\n", source="bcv")
+    assert r.json()["inserted"] == 1
+    assert get_price(client, "bcv", 1_577_851_200) == 10
+
+
+def test_import_rejected_sample_capped_at_10(client):
+    body = "fecha,precio\n" + "".join(f"2020-01-01,x{i}\n" for i in range(15))
+    r = _import(client, body, source="bcv").json()
+    assert r["rejected"] == 15 and len(r["rejected_sample"]) == 10
+
+
+def test_import_too_large_413(client, monkeypatch):
+    monkeypatch.setattr("app.config.settings.import_max_bytes", 1000)
+    r = _import(client, "fecha,precio\n" + "2020-01-01,5\n" * 200, source="bcv")
+    assert r.status_code == 413
+
+
+def test_import_non_utf8_422(client):
+    r = _import(client, b"fecha,precio\n2020-01-01,5\xff\xfe\n", source="bcv")
+    assert r.status_code == 422
+
+
+def test_import_missing_columns_and_source_422(client):
+    assert _import(client, "a,b\n1,2\n", source="bcv").status_code == 422
+    assert _import(client, "fecha,precio\n2020-01-01,5\n").status_code == 422
+    assert _import(client, "fecha,precio\n2020-01-01,5\n", source="nope").status_code == 422
+
+
+def test_import_replace_keeps_ticks_outside_range(client):
+    _import(client, "fecha,precio\n2020-01-01,1\n2020-01-10,2\n2020-01-20,3\n", source="bcv")
+    r = _import(client, "fecha,precio\n2020-01-05,9\n2020-01-12,9\n", source="bcv", replace="true")
+    assert r.json()["inserted"] == 2
+    rows = dbmod.get_db()._conn.execute("SELECT ts, price FROM ticks WHERE source='bcv' AND ts < ? ORDER BY ts", (T0,)).fetchall()
+    assert [r[1] for r in rows] == [1, 9, 9, 3]  # 01-01 y 01-20 fuera del rango se conservan; 01-10 reemplazado
 
 
 # ---------------------------------------------------------------- fuentes (HTTP simulado)

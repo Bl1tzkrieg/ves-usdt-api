@@ -61,4 +61,6 @@ class HistoryResponse(BaseModel):
 class ImportResult(BaseModel):
     received: int
     inserted: int
-    ignored: int
+    duplicates: int
+    rejected: int
+    rejected_sample: list[dict] = []

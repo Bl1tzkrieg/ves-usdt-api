@@ -15,13 +15,16 @@ from .. import aggregation as agg
 from ..aggregation import Candle, Fill, Interval, Value
 from ..collector import collector
 from ..config import settings
-from ..db import Tick, get_db
+from ..db import get_db
 from ..models import HistoryResponse, ImportResult, LatestPoint, SourceInfo
 from ..sources import DEFAULT_SOURCE, REGISTRY
+from ..tick_parsing import PRICE_KEYS, SOURCE_KEYS, TS_KEYS, rows_to_ticks, sniff_dialect
 
 router = APIRouter(prefix="/api/v1/rates", tags=["rates"])
 
 TZ_LABEL = f"UTC{settings.tz_offset_hours:+d}"
+IMPORT_REJECTED_SAMPLE = 10
+_READ_CHUNK = 1 << 20  # 1 MiB
 
 
 # ------------------------------------------------------------------ helpers de parámetros
@@ -269,50 +272,56 @@ async def import_csv(
     replace: bool = Query(False, description="Borrar antes los ticks de la(s) fuente(s) en el rango importado"),
 ):
     """CSV con cabecera. Columnas aceptadas (insensible a mayúsculas):
-    - `date` (YYYY-MM-DD o ISO 8601) **o** `timestamp` (epoch segundos)
-    - `price` (o `close`, `rate`, `promedio`)
+    - `date` (YYYY-MM-DD, ISO 8601, DD/MM/YYYY) **o** `timestamp` (epoch en s o ms)
+    - `price` (o `close`, `rate`, `promedio`); acepta `1.234,56` y `1,5`
     - `source` (opcional si se pasa `?source=`)
     - `buy`, `sell` (opcionales → se guardan en `extra`)
+
+    Las filas inválidas no abortan la importación: se informan en `rejected`/`rejected_sample`.
     """
-    content = (await file.read()).decode("utf-8-sig")
-    sample = content[:2048]
-    try:
-        dialect = csv.Sniffer().sniff(sample, delimiters=",;\t")
-    except csv.Error:
-        dialect = csv.excel
-    reader = csv.DictReader(io.StringIO(content), dialect=dialect)
+    content = await _read_csv_text(file)
+    reader = csv.DictReader(io.StringIO(content), dialect=sniff_dialect(content[:2048]))
     if not reader.fieldnames:
         raise HTTPException(422, "CSV vacío o sin cabecera")
-    cols = {c.lower().strip(): c for c in reader.fieldnames}
-    date_col = cols.get("date") or cols.get("fecha")
-    ts_col = cols.get("timestamp") or cols.get("ts")
-    price_col = next((cols[k] for k in ("price", "close", "rate", "promedio", "precio") if k in cols), None)
-    if not price_col or not (date_col or ts_col):
+    headers = {c.lower().strip() for c in reader.fieldnames if c}
+    if not headers & set(TS_KEYS) or not headers & set(PRICE_KEYS):
         raise HTTPException(422, f"Faltan columnas: se requiere (date|timestamp) y price. Cabecera: {reader.fieldnames}")
-    src_col = cols.get("source") or cols.get("fuente")
-    if not src_col and not source:
+    if not headers & set(SOURCE_KEYS) and not source:
         raise HTTPException(422, "Indique `?source=` o incluya una columna `source`")
     if source and source not in REGISTRY:
         raise HTTPException(422, f"Fuente desconocida {source!r}. Disponibles: {sorted(REGISTRY)}")
 
-    ticks: list[Tick] = []
-    for row in reader:
-        raw_price = (row.get(price_col) or "").replace(",", ".").strip()
-        if not raw_price:
-            continue
-        if ts_col and row.get(ts_col):
-            ts = int(float(row[ts_col]))
-        else:
-            ts = _parse_when(row[date_col].strip(), end=False)
-            if ts is None:
-                continue
-        src = (row.get(src_col) if src_col else None) or source
-        if src not in REGISTRY:
-            raise HTTPException(422, f"Fuente desconocida en el CSV: {src!r}")
-        extra = {k: float(row[cols[k]].replace(",", ".")) for k in ("buy", "sell") if k in cols and row.get(cols[k])}
-        ticks.append(Tick(source=src, ts=ts, price=float(raw_price), extra=extra or None))
+    try:
+        parsed = rows_to_ticks(reader, default_source=source, allowed_sources=REGISTRY)
+    except csv.Error as e:
+        raise HTTPException(422, f"CSV mal formado: {e}") from e
 
     db = get_db()
     write = db.replace_ticks if replace else db.insert_ticks
-    inserted = await asyncio.to_thread(write, ticks)
-    return ImportResult(received=len(ticks), inserted=inserted, ignored=len(ticks) - inserted)
+    inserted = await asyncio.to_thread(write, parsed.ticks)
+    return ImportResult(
+        received=len(parsed.ticks) + len(parsed.rejected),
+        inserted=inserted,
+        duplicates=len(parsed.ticks) - inserted,
+        rejected=len(parsed.rejected),
+        rejected_sample=parsed.rejected[:IMPORT_REJECTED_SAMPLE],
+    )
+
+
+async def _read_csv_text(file: UploadFile) -> str:
+    """Lee el archivo por trozos con tope de tamaño (413) y lo decodifica como UTF-8 (422)."""
+    limit = settings.import_max_bytes
+    too_large = HTTPException(413, f"El archivo supera el máximo de {limit} bytes")
+    if file.size is not None and file.size > limit:
+        raise too_large
+    chunks: list[bytes] = []
+    total = 0
+    while chunk := await file.read(_READ_CHUNK):
+        total += len(chunk)
+        if total > limit:
+            raise too_large
+        chunks.append(chunk)
+    try:
+        return b"".join(chunks).decode("utf-8-sig")
+    except UnicodeDecodeError as e:
+        raise HTTPException(422, "El archivo debe estar codificado en UTF-8") from e
