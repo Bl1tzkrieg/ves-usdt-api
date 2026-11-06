@@ -19,6 +19,7 @@ from .collector import collector
 from .config import settings
 from .db import get_db
 from .routers import rates
+from .security import SecurityHeadersMiddleware
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
@@ -48,6 +49,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware, allow_origins=settings.cors_origins, allow_methods=["*"], allow_headers=["*"]
 )
+app.add_middleware(SecurityHeadersMiddleware)
 app.include_router(rates.router)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 

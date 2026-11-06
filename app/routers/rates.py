@@ -8,14 +8,15 @@ import json
 from datetime import date, datetime, timedelta
 from typing import AsyncIterator, Iterator
 
-from fastapi import APIRouter, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile
 from fastapi.responses import StreamingResponse
 
 from .. import aggregation as agg
 from ..aggregation import Candle, Fill, Interval, Value
-from ..collector import collector
+from ..collector import CollectInProgress, collector
 from ..config import settings
 from ..db import get_db
+from ..security import require_api_key
 from ..models import HistoryResponse, ImportResult, LatestPoint, SourceInfo
 from ..sources import DEFAULT_SOURCE, REGISTRY
 from ..tick_parsing import PRICE_KEYS, SOURCE_KEYS, TS_KEYS, rows_to_ticks, sniff_dialect
@@ -253,9 +254,13 @@ async def stream(request: Request, sources: str | None = None, every: int = Quer
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
-@router.post("/collect", summary="Forzar una recolección inmediata de todas las fuentes")
+@router.post("/collect", summary="Forzar una recolección inmediata de todas las fuentes",
+             dependencies=[Depends(require_api_key)])
 async def collect_now():
-    ticks = await collector.collect_once()
+    try:
+        ticks = await collector.collect_once()
+    except CollectInProgress as e:
+        raise HTTPException(409, str(e)) from e
     return {"collected": [{"source": t.source, "price": t.price, "date": agg.local_iso(t.ts)} for t in ticks],
             "status": collector.last_status}
 
@@ -265,7 +270,8 @@ async def collector_status():
     return collector.status()
 
 
-@router.post("/import", response_model=ImportResult, summary="Importar histórico desde CSV")
+@router.post("/import", response_model=ImportResult, summary="Importar histórico desde CSV",
+             dependencies=[Depends(require_api_key)])
 async def import_csv(
     file: UploadFile,
     source: str | None = Query(None, description="Fuente destino si el CSV no trae columna `source`"),

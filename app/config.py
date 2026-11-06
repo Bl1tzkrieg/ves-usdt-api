@@ -31,7 +31,11 @@ class Settings(BaseSettings):
     # Tamaño máximo del CSV subido a /import (bytes)
     import_max_bytes: int = 10_000_000
 
-    cors_origins: list[str] = Field(default_factory=lambda: ["*"])
+    # Orígenes CORS permitidos (lista JSON). Vacío = sin CORS (solo mismo origen).
+    cors_origins: list[str] = Field(default_factory=list)
+
+    # Clave para los endpoints de escritura (/import, /collect). Vacía = se rechazan con 503.
+    api_key: str = ""
 
 
 settings = Settings()

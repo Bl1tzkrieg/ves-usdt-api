@@ -18,7 +18,15 @@ from .sources import REGISTRY, RateSource
 log = logging.getLogger("rates.collector")
 
 
+class CollectInProgress(RuntimeError):
+    """Ya hay una recolección en curso."""
+
+
 class Collector:
+    # Separación mínima entre recolecciones (anti-amplificación hacia las APIs externas)
+    min_gap_seconds = 30
+
+
     def __init__(self, sources: list[str] | None = None, interval: int | None = None) -> None:
         names = sources or settings.collector_sources
         self.sources: list[RateSource] = [REGISTRY[n] for n in names if n in REGISTRY]
@@ -27,9 +35,22 @@ class Collector:
         self._stop = asyncio.Event()
         self.last_run: float | None = None
         self.last_status: dict[str, str] = {}
+        self._lock = asyncio.Lock()
 
     async def collect_once(self) -> list[Tick]:
-        """Consulta todas las fuentes en paralelo y persiste lo obtenido. Devuelve los ticks nuevos."""
+        """Consulta todas las fuentes en paralelo y persiste lo obtenido. Devuelve los ticks nuevos.
+
+        Lanza `CollectInProgress` si ya hay una corrida activa y devuelve `[]` si la última
+        terminó hace menos de `min_gap_seconds`.
+        """
+        if self._lock.locked():
+            raise CollectInProgress("Ya hay una recolección en curso")
+        async with self._lock:
+            if self.last_run is not None and time.time() - self.last_run < self.min_gap_seconds:
+                return []
+            return await self._collect()
+
+    async def _collect(self) -> list[Tick]:
         async with httpx.AsyncClient(timeout=settings.http_timeout_seconds) as client:
             results = await asyncio.gather(*(s.fetch(client) for s in self.sources), return_exceptions=True)
         ticks: list[Tick] = []

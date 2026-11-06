@@ -22,6 +22,7 @@ T0 = 1_735_707_600  # 2025-01-01 00:00 -04:00
 @pytest.fixture()
 def client(monkeypatch):
     monkeypatch.setattr("app.config.settings.collector_enabled", False)
+    monkeypatch.setattr("app.config.settings.api_key", "test-key")
     mem = Database(":memory:")
     dbmod.set_db(mem)
     ticks = []
@@ -31,7 +32,7 @@ def client(monkeypatch):
         if d % 7 < 5:
             ticks.append(Tick("bcv", T0 + d * DAY, 90 + d))
     mem.insert_ticks(ticks)
-    with TestClient(app) as c:
+    with TestClient(app, headers={"X-API-Key": "test-key"}) as c:
         yield c
     dbmod.set_db(None)
 
