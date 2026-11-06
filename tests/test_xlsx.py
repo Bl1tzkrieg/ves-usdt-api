@@ -129,6 +129,7 @@ def test_xlsx_over_cell_cap_is_422(client, monkeypatch):
     r = client.get(XLSX, params={**RANGE, "interval": "hour", "fill": "forward"})  # 240 horas x 2 x 7
     assert r.status_code == 422
     assert "history.csv" in r.text
+    assert "el tope es 1.000." in r.json()["detail"]  # separador de miles venezolano
 
 
 def test_heavy_builds_are_serialized(client, monkeypatch):

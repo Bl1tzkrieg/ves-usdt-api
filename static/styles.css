@@ -166,8 +166,6 @@ h2 { font-size: 16px; font-weight: 600; margin: 0; }
   cursor: pointer;
 }
 .actions button:hover { background: var(--wash); }
-.actions button[aria-disabled="true"] { color: var(--muted); border-style: dashed; cursor: not-allowed; }
-.actions button[aria-disabled="true"]:hover { background: var(--surface); }
 .actions button[aria-pressed="true"] { border-color: var(--ink); font-weight: 600; }
 .status { margin: 0 0 0 auto; font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
 .live { width: 8px; height: 8px; border-radius: 50%; background: #0ca30c; flex: none; }

@@ -145,7 +145,8 @@ async def history_xlsx(
     cells = sum(len(points) for points in data.values()) * columns
     if cells > settings.export_max_cells:
         raise InvalidQuery(
-            f"El libro tendría unas {cells:,} celdas y el tope es {settings.export_max_cells:,}. "
+            f"El libro tendría unas {_thousands(cells)} celdas "
+            f"y el tope es {_thousands(settings.export_max_cells)}. "
             "Reduzca el rango, use un intervalo mayor o pida `history.csv`, que no tiene ese límite."
         )
     content = await run_heavy(build_workbook, data, names, q.interval, value)
@@ -186,3 +187,8 @@ async def report_pdf(
     return Response(
         content, media_type=PDF_MEDIA_TYPE, headers={"Content-Disposition": f'attachment; filename="{name}"'}
     )
+
+
+def _thousands(n: int) -> str:
+    """Entero con punto como separador de miles (es-VE): 400000 -> 400.000."""
+    return f"{n:,}".replace(",", ".")
