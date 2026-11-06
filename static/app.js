@@ -88,18 +88,30 @@ function params(extra = {}) {
   return p;
 }
 
-// `/daily-change` solo acepta `days` hacia atrás desde ahora: se traduce el rango y luego se recorta
+const presetDays = () => (state.days > 0 ? state.days : ALL_TIME_DAYS);
+
+// Primer día del rango que ve la gráfica principal ("YYYY-MM-DD"), o null si es "últimos N días" desde ahora.
+// Con solo "Hasta", el servidor cuenta `days` hacia atrás desde `end`.
+function rangeStartDate() {
+  const start = $('start').value, end = $('end').value;
+  if (start) return start;
+  if (!end) return null;
+  return new Date(calendarDate(end).getTime() - presetDays() * DAY_MS).toISOString().slice(0, 10);
+}
+
+// `/daily-change` solo acepta `days` hacia atrás desde ahora: se pide una ventana que cubra
+// [inicio del rango, ahora] y luego se recorta con `withinRange`
 function dailyChangeDays() {
-  const start = $('start').value;
-  if (!start) return state.days > 0 ? state.days : ALL_TIME_DAYS;
-  const days = Math.ceil((Date.now() - calendarDate(start).getTime()) / DAY_MS) + 1;
+  const from = rangeStartDate();
+  if (!from) return presetDays();
+  const days = Math.ceil((Date.now() - calendarDate(from).getTime()) / DAY_MS) + 1;
   return Math.min(Math.max(days, 1), ALL_TIME_DAYS);
 }
 
 function withinRange(isoDate) {
-  const start = $('start').value, end = $('end').value;
+  const from = rangeStartDate(), end = $('end').value;
   const d = isoDate.slice(0, 10);
-  return (!start || d >= start) && (!end || d <= end);
+  return (!from || d >= from) && (!end || d <= end);
 }
 
 // --- Gráficas
@@ -243,12 +255,17 @@ function buildCharts() {
 }
 
 // --- Estado vacío explícito por panel
-function setEmpty(id, missing) {
+function setMessage(id, text) {
   const node = $(id);
-  if (!missing.length) { node.hidden = true; node.textContent = ''; return; }
-  node.hidden = false;
-  node.textContent = `${missing.join(', ')}: Sin datos en este rango — corre el backfill`;
+  node.hidden = !text;
+  node.textContent = text || '';
 }
+
+function setEmpty(id, missing) {
+  setMessage(id, missing.length ? `${missing.join(', ')}: Sin datos en este rango — corre el backfill` : '');
+}
+
+const loadError = (err) => `No se pudo cargar: ${err.message}`;
 
 function setLoading(on) {
   ['panel-main', 'panel-daily', 'panel-spread'].forEach((id) => $(id).classList.toggle('is-loading', on));
@@ -256,14 +273,22 @@ function setLoading(on) {
 
 // --- Serie principal + paneles secundarios
 let lastData, lastDaily = [], lastSpread = [];
+let dailyError = null, spreadError = null;
 let loadSeq = 0;
 
 async function load() {
+  const seq = ++loadSeq; // invalida cualquier respuesta en vuelo
   if (!state.sources.length) {
-    setEmpty('main-empty', ['Ninguna fuente marcada']);
+    setLoading(false);
+    lastData = undefined;
+    charts.main.data.labels = [];
+    charts.main.data.datasets = [];
+    charts.main.update();
+    setMessage('main-empty', 'Marca al menos una fuente');
+    $('panel-main').classList.add('is-empty');
+    setStatus('');
     return;
   }
-  const seq = ++loadSeq;
   setLoading(true);
   $('status').textContent = 'Cargando…';
   const primary = primarySource();
@@ -278,10 +303,17 @@ async function load() {
   ]);
   if (seq !== loadSeq) return; // llegó una consulta más nueva mientras tanto
   setLoading(false);
-  if (main.status === 'rejected') { setStatus(main.reason.message); return; }
+  if (main.status === 'rejected') {
+    setStatus(main.reason.message);
+    setMessage('main-empty', loadError(main.reason));
+    return; // la gráfica conserva lo último que mostró
+  }
   lastData = main.value;
-  lastDaily = daily.status === 'fulfilled' ? daily.value.filter((d) => withinRange(d.date)) : [];
-  lastSpread = spread.status === 'fulfilled' ? spreadSeries(spread.value, primary) : [];
+  // Un fallo no es "sin datos": se guarda el error para que el panel lo diga
+  dailyError = daily.status === 'rejected' ? daily.reason : null;
+  spreadError = spread.status === 'rejected' ? spread.reason : null;
+  lastDaily = dailyError ? [] : daily.value.filter((d) => withinRange(d.date));
+  lastSpread = spreadError ? [] : spreadSeries(spread.value, primary);
   render();
 }
 
@@ -315,7 +347,7 @@ function render() {
     const by = new Map(s.points.map((p) => [p.date, pointValue(p, interval, valueKey)]));
     const color = seriesColor(s.source);
     return {
-      label: `${s.label} (${s.unit})`, source: s.source, data: labels.map((l) => (by.has(l) ? by.get(l) : null)),
+      label: s.label, source: s.source, data: labels.map((l) => (by.has(l) ? by.get(l) : null)),
       borderColor: color, backgroundColor: color, pointHoverBackgroundColor: color, pointHoverBorderColor: surface,
       spanGaps: true,
     };
@@ -352,7 +384,8 @@ function renderDaily(longSpan) {
     categoryPercentage: 1, barPercentage: thin ? 1 : 0.8, borderWidth: 0,
   }];
   c.update();
-  setEmpty('daily-empty', lastDaily.length ? [] : [shortLabel(primary)]);
+  if (dailyError) setMessage('daily-empty', loadError(dailyError));
+  else setEmpty('daily-empty', lastDaily.length ? [] : [shortLabel(primary)]);
   $('panel-daily').classList.toggle('is-empty', !lastDaily.length);
 }
 
@@ -368,7 +401,8 @@ function renderSpread(longSpan) {
     pointHoverBackgroundColor: color, pointHoverBorderColor: cssVar('--surface'),
   }];
   c.update();
-  setEmpty('spread-empty', lastSpread.length ? [] : [`${shortLabel(primary)} o BCV`]);
+  if (spreadError) setMessage('spread-empty', loadError(spreadError));
+  else setEmpty('spread-empty', lastSpread.length ? [] : [`${shortLabel(primary)} o BCV`]);
   $('panel-spread').classList.toggle('is-empty', !lastSpread.length);
 }
 
@@ -447,7 +481,7 @@ function sparkline(values, color) {
 
 function deltaNode(change) {
   if (!change) return el('div', { class: 'tile-delta flat' }, [el('span', { class: 'vs', text: 'Sin dato de hace 24 h' })]);
-  const dir = change.pct > 0.005 ? 'up' : change.pct < -0.005 ? 'down' : 'flat';
+  const dir = change.pct >= 0.05 ? 'up' : change.pct <= -0.05 ? 'down' : 'flat'; // nunca "sube 0,0 %"
   const arrow = { up: '▲', down: '▼', flat: '■' }[dir];
   const word = { up: 'sube', down: 'baja', flat: 'igual' }[dir];
   return el('div', { class: `tile-delta ${dir}` }, [
@@ -463,7 +497,15 @@ async function loadTiles() {
     getJson(`${API}/stats?sources=${names.join(',')}&reference=${REFERENCE}`),
     getJson(`${API}/history?days=7&interval=hour&fill=forward&sources=${names.join(',')}`),
   ]);
-  if (statsRes.status === 'fulfilled') state.stats = statsRes.value;
+  if (statsRes.status === 'fulfilled') {
+    state.stats = statsRes.value;
+    for (const st of state.stats) markSeen(st.source, Math.floor(Date.parse(st.latest_date) / 1000));
+  } else if (!state.stats.length) {
+    // primera carga fallida: decirlo en vez de pintar tiles "sin datos"
+    $('tiles').replaceChildren(el('p', { class: 'empty tiles-error', text: loadError(statsRes.reason) }));
+    renderHero(statsRes.reason);
+    return;
+  } // si falla un refresco, se conservan los últimos valores
   const spark = new Map();
   if (sparkRes.status === 'fulfilled') {
     for (const s of sparkRes.value.series) {
@@ -491,12 +533,12 @@ async function loadTiles() {
   renderHero();
 }
 
-function renderHero() {
+function renderHero(error = null) {
   const usdt = USDT_SOURCES.map((n) => state.stats.find((s) => s.source === n)).find((s) => s && s.spread_vs_reference_pct != null);
   if (!usdt) {
     $('hero-label').textContent = 'Brecha USDT contra BCV';
     $('hero-value').textContent = '—';
-    $('hero-note').textContent = 'Hace falta un precio USDT y uno del BCV';
+    $('hero-note').textContent = error ? loadError(error) : 'Hace falta un precio USDT y uno del BCV';
     return;
   }
   const ref = state.stats.find((s) => s.source === REFERENCE);
@@ -514,16 +556,19 @@ function pdfUrl() {
   return `${API}/report.pdf?month=${ref.slice(0, 7)}`;
 }
 
-async function probePending(button, url) {
-  try {
-    const res = await fetch(url, { method: 'HEAD' });
-    // 405: la ruta existe pero solo admite GET (FastAPI no añade HEAD por defecto)
-    if (res.ok || res.status === 405) {
-      button.removeAttribute('aria-disabled');
-      button.removeAttribute('title');
-      button.dataset.pending = 'false';
-    }
-  } catch (_) { /* sin red: queda deshabilitado */ }
+const PENDING_EXPORTS = { xlsx: `${API}/history.xlsx`, pdf: `${API}/report.pdf` };
+
+// Una sola lectura del esquema OpenAPI: sin peticiones a rutas que aún no existen ni efectos secundarios
+async function enablePendingExports() {
+  let paths;
+  try { paths = (await getJson('/openapi.json')).paths || {}; } catch (_) { return; } // quedan deshabilitados
+  for (const [id, path] of Object.entries(PENDING_EXPORTS)) {
+    if (!(path in paths)) continue;
+    const button = $(id);
+    button.removeAttribute('aria-disabled');
+    button.removeAttribute('title');
+    button.dataset.pending = 'false';
+  }
 }
 
 function onExport(button, urlFn) {
@@ -533,10 +578,26 @@ function onExport(button, urlFn) {
   });
 }
 
-// --- En vivo: SSE refresca tiles y gráficas cuando llega un tick nuevo
+// --- En vivo: SSE refresca tiles y gráficas solo cuando llega un tick más nuevo que el ya mostrado.
+// El primer evento tras cada (re)conexión trae el último tick de cada fuente, que casi siempre ya está en pantalla.
+const seenTs = new Map();
+function markSeen(source, ts) {
+  if (Number.isFinite(ts) && ts > (seenTs.get(source) ?? -Infinity)) seenTs.set(source, ts);
+}
+
+function onRates(event) {
+  let ticks;
+  try { ticks = JSON.parse(event.data); } catch (_) { return; }
+  const fresh = ticks.filter((t) => !(seenTs.get(t.source) >= t.t));
+  if (!fresh.length) return;
+  fresh.forEach((t) => markSeen(t.source, t.t));
+  loadTiles();
+  load();
+}
+
 function connectLive() {
   const es = new EventSource(`${API}/stream?every=15`);
-  es.addEventListener('rates', () => { loadTiles(); load(); });
+  es.addEventListener('rates', onRates);
   es.addEventListener('error', () => { es.close(); setTimeout(connectLive, 10000); });
 }
 
@@ -572,9 +633,8 @@ async function init() {
   wireControls();
   buildCharts();
   try { await loadCatalog(); } catch (e) { setStatus(e.message); return; }
-  probePending($('xlsx'), xlsxUrl());
-  probePending($('pdf'), pdfUrl());
-  await Promise.all([loadTiles(), load()]);
+  await Promise.all([loadTiles(), load(), enablePendingExports()]);
+  document.documentElement.dataset.settled = 'true'; // primera carga completa (lo espera scripts/screenshot.py)
   connectLive();
 }
 
