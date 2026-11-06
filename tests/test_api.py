@@ -1,0 +1,127 @@
+"""pytest -q  (usa una BD en memoria y fuentes simuladas; no toca la red)."""
+from __future__ import annotations
+
+import asyncio
+import json
+
+import httpx
+import pytest
+from fastapi.testclient import TestClient
+
+from app import db as dbmod
+from app.db import Database, Tick
+from app.main import app
+from app.sources.binance_p2p import BinanceP2PSource
+from app.sources.dolarapi import BCVSource
+from app.sources.yadio import YadioSource
+
+DAY = 86400
+T0 = 1_735_707_600  # 2025-01-01 00:00 -04:00
+
+
+@pytest.fixture()
+def client(monkeypatch):
+    monkeypatch.setattr("app.config.settings.collector_enabled", False)
+    mem = Database(":memory:")
+    dbmod.set_db(mem)
+    ticks = []
+    for d in range(10):  # 10 días, 4 ticks/día para binance; BCV solo días hábiles (0..4 y 7..9)
+        for h in (8, 12, 16, 20):
+            ticks.append(Tick("binance_p2p", T0 + d * DAY + h * 3600, 100 + d + h / 100))
+        if d % 7 < 5:
+            ticks.append(Tick("bcv", T0 + d * DAY, 90 + d))
+    mem.insert_ticks(ticks)
+    with TestClient(app) as c:
+        yield c
+    dbmod.set_db(None)
+
+
+def test_history_day_ohlc(client):
+    r = client.get("/api/v1/rates/history", params={"start": "2025-01-01", "end": "2025-01-03", "sources": "binance_p2p"})
+    assert r.status_code == 200
+    pts = r.json()["series"][0]["points"]
+    assert [p["date"][:10] for p in pts] == ["2025-01-01", "2025-01-02", "2025-01-03"]
+    assert pts[0]["open"] == pytest.approx(100.08) and pts[0]["close"] == pytest.approx(100.20)
+    assert pts[0]["count"] == 4
+
+
+def test_fill_forward_with_seed(client):
+    # rango que empieza en fin de semana (día 5): BCV no tiene tick, se rellena con el del día 4
+    r = client.get("/api/v1/rates/history", params={"start": "2025-01-06", "end": "2025-01-08", "sources": "bcv", "fill": "forward"})
+    pts = r.json()["series"][0]["points"]
+    assert pts[0]["filled"] is True and pts[0]["close"] == 94
+    assert pts[2]["filled"] is False and pts[2]["close"] == 97
+
+
+def test_week_and_month_rollup(client):
+    r = client.get("/api/v1/rates/history", params={"days": 3650, "sources": "binance_p2p", "interval": "week"})
+    weeks = r.json()["series"][0]["points"]
+    assert weeks[0]["date"][:10] == "2024-12-30"  # lunes
+    assert sum(w["count"] for w in weeks) == 40
+    r = client.get("/api/v1/rates/history", params={"days": 3650, "sources": "binance_p2p", "interval": "month"})
+    assert len(r.json()["series"][0]["points"]) == 1
+
+
+def test_no_range_limit(client):
+    r = client.get("/api/v1/rates/history", params={"start": "1990-01-01", "end": "2100-01-01", "sources": "binance_p2p"})
+    assert r.status_code == 200 and len(r.json()["series"][0]["points"]) == 10
+
+
+def test_csv_wide(client):
+    r = client.get("/api/v1/rates/history.csv", params={"start": "2025-01-01", "end": "2025-01-02", "sources": "binance_p2p,bcv", "layout": "wide", "sep": ";"})
+    lines = r.text.strip().splitlines()
+    assert lines[0] == "date;timestamp;binance_p2p;bcv"
+    assert lines[1].startswith("2025-01-01;") and lines[1].endswith(";100,2;90")  # sep=';' => coma decimal
+    assert "attachment" in r.headers["content-disposition"]
+    r = client.get("/api/v1/rates/history.csv", params={"start": "2025-01-01", "end": "2025-01-01", "sources": "binance_p2p", "layout": "wide"})
+    assert r.text.strip().splitlines()[1].endswith(",100.2")  # sep=',' => punto decimal
+
+
+def test_fill_forward_without_previous_omits_rows(client):
+    # el rango empieza antes del primer tick: no hay nada que repetir, no se emiten filas vacías
+    r = client.get("/api/v1/rates/history", params={"start": "2024-12-25", "end": "2025-01-02", "sources": "bcv", "fill": "forward"})
+    pts = r.json()["series"][0]["points"]
+    assert [p["date"][:10] for p in pts] == ["2025-01-01", "2025-01-02"]
+    r = client.get("/api/v1/rates/history", params={"start": "2024-12-30", "end": "2025-01-01", "sources": "bcv", "fill": "null"})
+    assert [p["close"] for p in r.json()["series"][0]["points"]] == [None, None, 90]
+
+
+def test_validation_errors(client):
+    assert client.get("/api/v1/rates/history", params={"start": "2025-02-01", "end": "2025-01-01"}).status_code == 422
+    assert client.get("/api/v1/rates/history", params={"sources": "nope"}).status_code == 422
+
+
+def test_import_csv(client):
+    body = "fecha;precio\n2020-01-01;5,5\n2020-01-02;6\n"
+    r = client.post("/api/v1/rates/import", params={"source": "bcv"}, files={"file": ("h.csv", body, "text/csv")})
+    assert r.json() == {"received": 2, "inserted": 2, "ignored": 0}
+    r = client.get("/api/v1/rates/history", params={"start": "2020-01-01", "end": "2020-01-02", "sources": "bcv"})
+    assert [p["close"] for p in r.json()["series"][0]["points"]] == [5.5, 6]
+
+
+# ---------------------------------------------------------------- fuentes (HTTP simulado)
+
+def _client(handler):
+    return httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+
+def test_binance_source_parses_median():
+    def handler(req: httpx.Request):
+        body = json.loads(req.content)
+        base = 100 if body["tradeType"] == "BUY" else 98
+        return httpx.Response(200, json={"data": [{"adv": {"price": str(base + i)}} for i in range(5)]})
+
+    tick = asyncio.run(BinanceP2PSource().fetch(_client(handler)))
+    assert tick.extra["buy"] == 102 and tick.extra["sell"] == 100 and tick.price == 101
+
+
+def test_yadio_and_bcv_sources():
+    def handler(req: httpx.Request):
+        if "yadio" in req.url.host:
+            return httpx.Response(200, json={"rate": 938.9, "timestamp": 1788954013210})
+        return httpx.Response(200, json={"promedio": 832.49, "fechaActualizacion": "2026-09-11T00:00:00-04:00"})
+
+    y = asyncio.run(YadioSource().fetch(_client(handler)))
+    b = asyncio.run(BCVSource().fetch(_client(handler)))
+    assert y.price == 938.9 and y.ts == 1788954013
+    assert b.price == 832.49 and b.ts == 1789099200

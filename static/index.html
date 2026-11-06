@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>USDT / VES — Histórico</title>
+<script src="/static/chart.umd.min.js"></script>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+    --grid: #e1e0d9; --axis: #c3c2b7; --border: rgba(11,11,11,.10);
+    --s-binance_p2p: #2a78d6; --s-yadio: #eb6834; --s-bcv: #1baf7a; --s-paralelo: #eda100;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #0d0d0d; --surface: #1a1a19; --ink: #fff; --ink-2: #c3c2b7; --grid: #2c2c2a; --axis: #383835;
+      --border: rgba(255,255,255,.10);
+      --s-binance_p2p: #3987e5; --s-yadio: #d95926; --s-bcv: #199e70; --s-paralelo: #c98500;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px 16px 40px; background: var(--page); color: var(--ink);
+         font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: var(--ink-2); margin: 0 0 16px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: flex-end; margin-bottom: 14px; }
+  .controls label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--ink-2); }
+  .controls input, .controls select, .controls button { font: inherit; padding: 6px 8px; border-radius: 6px;
+      border: 1px solid var(--axis); background: var(--surface); color: var(--ink); }
+  .presets { display: flex; gap: 6px; flex-wrap: wrap; }
+  .presets button, .actions button { cursor: pointer; }
+  .presets button[aria-pressed="true"] { border-color: var(--s-binance_p2p); font-weight: 600; }
+  .sources { display: flex; gap: 12px; flex-wrap: wrap; }
+  .sources label { flex-direction: row; align-items: center; gap: 6px; font-size: 13px; color: var(--ink); }
+  .swatch { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin-bottom: 14px; }
+  .tile { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+  .tile .k { font-size: 12px; color: var(--ink-2); display: flex; align-items: center; gap: 6px; }
+  .tile .v { font-size: 22px; font-weight: 600; margin-top: 2px; }
+  .tile .d { font-size: 12px; color: var(--muted); }
+  .chart-wrap { position: relative; height: 420px; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; align-items: center; }
+  .status { font-size: 12px; color: var(--muted); margin-left: auto; }
+  .live { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #0ca30c; margin-right: 6px; }
+  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; font-size: 13px; }
+  th, td { text-align: right; padding: 5px 8px; border-bottom: 1px solid var(--grid); }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--ink-2); font-weight: 600; position: sticky; top: 0; background: var(--surface); }
+  .table-wrap { max-height: 360px; overflow: auto; margin-top: 12px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<h1>Bolívar (VES) por 1 USDT / USD</h1>
+<p class="sub">Histórico y valor en vivo. Rango libre de fechas, agregación por hora/día/semana/mes, exportable a CSV.</p>
+
+<div class="tiles" id="tiles"></div>
+
+<div class="card">
+  <div class="controls">
+    <label>Rango rápido
+      <div class="presets" id="presets">
+        <button data-days="7">7 d</button><button data-days="30" aria-pressed="true">30 d</button>
+        <button data-days="90">90 d</button><button data-days="180">6 m</button>
+        <button data-days="365">1 a</button><button data-days="1095">3 a</button><button data-days="0">Todo</button>
+      </div>
+    </label>
+    <label>Desde <input type="date" id="start"></label>
+    <label>Hasta <input type="date" id="end"></label>
+    <label>Intervalo
+      <select id="interval">
+        <option value="raw">Sin agregar (ticks)</option>
+        <option value="hour">Hora</option>
+        <option value="day" selected>Día</option>
+        <option value="week">Semana</option>
+        <option value="month">Mes</option>
+      </select>
+    </label>
+    <label>Valor
+      <select id="value">
+        <option value="close" selected>Cierre</option><option value="avg">Promedio</option>
+        <option value="open">Apertura</option><option value="high">Máximo</option><option value="low">Mínimo</option>
+      </select>
+    </label>
+    <label>Huecos
+      <select id="fill">
+        <option value="none">Omitir</option><option value="forward" selected>Repetir último</option><option value="null">Dejar vacío</option>
+      </select>
+    </label>
+    <label>Fuentes <div class="sources" id="sources"></div></label>
+  </div>
+
+  <div class="chart-wrap"><canvas id="chart" role="img" aria-label="Serie temporal del tipo de cambio"></canvas></div>
+
+  <div class="actions">
+    <button id="csv-long">Descargar CSV (detalle OHLC)</button>
+    <button id="csv-wide">Descargar CSV (una columna por fuente)</button>
+    <button id="toggle-table" aria-pressed="false">Ver tabla</button>
+    <span class="status" id="status"></span>
+  </div>
+  <div class="table-wrap" id="table-wrap" hidden></div>
+</div>
+
+<script>
+const API = '/api/v1/rates';
+const state = { days: 30, sources: ['binance_p2p', 'bcv'], catalog: [] };
+const $ = (id) => document.getElementById(id);
+const cssVar = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const fmt = new Intl.NumberFormat('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtDate = (iso, interval) => interval === 'raw' || interval === 'hour'
+  ? new Date(iso).toLocaleString('es-VE', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
+  : iso.slice(0, 10);
+
+let chart;
+function ensureChart() {
+  if (chart) return chart;
+  Chart.defaults.font.family = 'system-ui, -apple-system, "Segoe UI", sans-serif';
+  chart = new Chart($('chart'), {
+    type: 'line',
+    data: { labels: [], datasets: [] },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      interaction: { mode: 'index', intersect: false },
+      elements: { line: { borderWidth: 2, tension: 0 }, point: { radius: 0, hitRadius: 8, hoverRadius: 4 } },
+      plugins: {
+        legend: { display: true, labels: { color: cssVar('--ink-2'), boxWidth: 10, boxHeight: 10, usePointStyle: true } },
+        tooltip: { callbacks: { label: (c) => ` ${c.dataset.label}: ${c.parsed.y == null ? '—' : fmt.format(c.parsed.y)} Bs` } },
+      },
+      scales: {
+        x: { ticks: { color: cssVar('--muted'), maxTicksLimit: 10, maxRotation: 0 }, grid: { display: false }, border: { color: cssVar('--axis') } },
+        y: { ticks: { color: cssVar('--muted'), callback: (v) => fmt.format(v) }, grid: { color: cssVar('--grid') }, border: { display: false },
+             title: { display: true, text: 'Bs por unidad', color: cssVar('--muted') } },
+      },
+    },
+  });
+  return chart;
+}
+
+function params(extra = {}) {
+  const p = new URLSearchParams();
+  const start = $('start').value, end = $('end').value;
+  if (start) p.set('start', start); else if (state.days > 0) p.set('days', state.days); else p.set('start', '2000-01-01');
+  if (end) p.set('end', end);
+  p.set('interval', $('interval').value);
+  p.set('fill', $('fill').value);
+  p.set('sources', state.sources.join(','));
+  if ($('interval').value === 'raw') p.set('max_points', '2000');
+  for (const [k, v] of Object.entries(extra)) p.set(k, v);
+  return p;
+}
+
+let lastData;
+async function load() {
+  if (!state.sources.length) return;
+  $('status').textContent = 'Cargando…';
+  const res = await fetch(`${API}/history?${params()}`);
+  if (!res.ok) { $('status').textContent = `Error ${res.status}`; return; }
+  lastData = await res.json();
+  render(lastData);
+}
+
+function render(data) {
+  const c = ensureChart();
+  const interval = data.interval, valueKey = $('value').value;
+  const labelSet = new Set();
+  data.series.forEach((s) => s.points.forEach((p) => labelSet.add(p.date)));
+  const labels = [...labelSet].sort();
+  c.data.labels = labels.map((l) => fmtDate(l, interval));
+  c.data.datasets = data.series.map((s) => {
+    const by = new Map(s.points.map((p) => [p.date, interval === 'raw' ? p.price : p[valueKey]]));
+    const color = cssVar(`--s-${s.source}`) || '#888';
+    return { label: `${s.label} (${s.unit})`, data: labels.map((l) => by.has(l) ? by.get(l) : null),
+             borderColor: color, backgroundColor: color, spanGaps: true, pointStyle: 'circle' };
+  });
+  c.update();
+  const n = data.series.reduce((a, s) => a + s.points.length, 0);
+  $('status').innerHTML = `<span class="live"></span>${n} puntos · ${data.start.slice(0,10)} → ${data.end.slice(0,10)} · ${data.timezone}`;
+  renderTable(data, labels, valueKey);
+}
+
+function renderTable(data, labels, valueKey) {
+  const wrap = $('table-wrap');
+  if (wrap.hidden) return;
+  const rows = labels.map((l) => `<tr><td>${fmtDate(l, data.interval)}</td>${data.series.map((s) => {
+    const p = s.points.find((x) => x.date === l); const v = p ? (data.interval === 'raw' ? p.price : p[valueKey]) : null;
+    return `<td>${v == null ? '—' : fmt.format(v)}</td>`; }).join('')}</tr>`);
+  wrap.innerHTML = `<table><thead><tr><th>Fecha</th>${data.series.map((s) => `<th>${s.label}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table>`;
+}
+
+async function loadCatalog() {
+  state.catalog = await (await fetch(`${API}/sources`)).json();
+  $('sources').innerHTML = state.catalog.map((s) => `<label><input type="checkbox" value="${s.name}" ${state.sources.includes(s.name) ? 'checked' : ''}>
+     <span class="swatch" style="background:${cssVar(`--s-${s.name}`)}"></span>${s.label}</label>`).join('');
+  $('sources').querySelectorAll('input').forEach((cb) => cb.addEventListener('change', () => {
+    state.sources = [...$('sources').querySelectorAll('input:checked')].map((i) => i.value); load();
+  }));
+}
+
+async function loadLatest() {
+  const latest = await (await fetch(`${API}/latest`)).json();
+  $('tiles').innerHTML = latest.map((p) => {
+    const meta = state.catalog.find((s) => s.name === p.source) || { label: p.source, unit: '' };
+    const extra = p.extra && p.extra.buy ? `compra ${fmt.format(p.extra.buy)} · venta ${fmt.format(p.extra.sell)}` : '';
+    return `<div class="tile"><div class="k"><span class="swatch" style="background:${cssVar(`--s-${p.source}`)}"></span>${meta.label}</div>
+      <div class="v">${fmt.format(p.price)} Bs</div><div class="d">${new Date(p.date).toLocaleString('es-VE')}${extra ? ' · ' + extra : ''}</div></div>`;
+  }).join('');
+}
+
+// --- En vivo: SSE actualiza las tarjetas y refresca la serie cuando llega un tick nuevo
+function connectLive() {
+  const es = new EventSource(`${API}/stream?every=15`);
+  es.addEventListener('rates', () => { loadLatest(); load(); });
+  es.onerror = () => { es.close(); setTimeout(connectLive, 10000); };
+}
+
+// --- UI
+$('presets').addEventListener('click', (e) => {
+  const b = e.target.closest('button'); if (!b) return;
+  $('presets').querySelectorAll('button').forEach((x) => x.setAttribute('aria-pressed', x === b));
+  state.days = +b.dataset.days; $('start').value = ''; $('end').value = ''; load();
+});
+['start', 'end', 'interval', 'fill'].forEach((id) => $(id).addEventListener('change', () => {
+  if (id === 'start' || id === 'end') $('presets').querySelectorAll('button').forEach((x) => x.setAttribute('aria-pressed', 'false'));
+  load();
+}));
+$('value').addEventListener('change', () => lastData && render(lastData));
+$('csv-long').onclick = () => location.href = `${API}/history.csv?${params({ layout: 'long', sep: ';' })}`;
+$('csv-wide').onclick = () => location.href = `${API}/history.csv?${params({ layout: 'wide', sep: ';', value: $('value').value })}`;
+$('toggle-table').onclick = () => {
+  const w = $('table-wrap'); w.hidden = !w.hidden; $('toggle-table').setAttribute('aria-pressed', !w.hidden);
+  $('toggle-table').textContent = w.hidden ? 'Ver tabla' : 'Ocultar tabla'; if (lastData) render(lastData);
+};
+
+(async () => { await loadCatalog(); await Promise.all([loadLatest(), load()]); connectLive(); })();
+</script>
+</body>
+</html>

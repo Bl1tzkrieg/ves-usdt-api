@@ -1,0 +1,8 @@
+data/
+__pycache__/
+.env
+.venv/
+.pytest_cache/
+.idea/
+*.pyc
+.ruff_cache/
