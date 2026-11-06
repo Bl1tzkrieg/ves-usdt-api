@@ -282,7 +282,10 @@ function setLoading(on) {
 let lastData, lastDaily = [], lastSpread = [];
 let dailyError = null, spreadError = null;
 let loadSeq = 0;
-let loadFailure = ''; // mensaje del último fallo de /history principal; vacío si fue bien
+const LOADING = 'Cargando…';
+// Por qué no se puede exportar ahora: carga en curso o fallo de la última /history principal; vacío si fue bien.
+// Arranca bloqueado: hasta que la primera carga termine bien, exportar bajaría un rango que no se ha visto.
+let exportBlocker = LOADING;
 
 async function load() {
   const seq = ++loadSeq; // invalida cualquier respuesta en vuelo
@@ -294,12 +297,13 @@ async function load() {
     charts.main.update();
     setMessage('main-empty', 'Marca al menos una fuente');
     $('panel-main').classList.add('is-empty');
-    loadFailure = '';
+    exportBlocker = '';
     setStatus('');
     return;
   }
   setLoading(true);
-  $('status').textContent = 'Cargando…';
+  exportBlocker = LOADING;
+  $('status').textContent = LOADING;
   const primary = primarySource();
   const spreadParams = rangeParams();
   spreadParams.set('interval', 'day');
@@ -313,13 +317,13 @@ async function load() {
   if (seq !== loadSeq) return; // llegó una consulta más nueva mientras tanto
   setLoading(false);
   if (main.status === 'rejected') {
-    loadFailure = main.reason.message;
-    setStatus(loadFailure);
+    exportBlocker = main.reason.message;
+    setStatus(exportBlocker);
     setMessage('main-empty', loadError(main.reason));
     return; // la gráfica conserva lo último que mostró
   }
   lastData = main.value;
-  loadFailure = '';
+  exportBlocker = '';
   // Un fallo no es "sin datos": se guarda el error para que el panel lo diga
   dailyError = daily.status === 'rejected' ? daily.reason : null;
   spreadError = spread.status === 'rejected' ? spread.reason : null;
@@ -586,7 +590,7 @@ function onExport(button, urlFn) {
   button.addEventListener('click', () => {
     if (button.getAttribute('aria-disabled') === 'true') return;
     if (!state.sources.length) { setStatus('Marca al menos una fuente'); return; }
-    if (loadFailure) { setStatus(loadFailure); return; }
+    if (exportBlocker) { setStatus(exportBlocker); return; }
     location.href = urlFn();
   });
 }

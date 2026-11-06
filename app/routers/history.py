@@ -1,4 +1,4 @@
-"""Endpoints de lectura: fuentes, último valor e histórico (JSON/CSV)."""
+"""Endpoints de lectura: fuentes, último valor e histórico (JSON/CSV/XLSX)."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import asyncio
 from typing import Annotated, Any
 
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 
 from .. import aggregation as agg
 from ..aggregation import CandleField
@@ -16,6 +16,7 @@ from ..db import get_db
 from ..models import HistoryResponse, LatestPoint, SourceInfo
 from ..series import build_series, tick_to_point
 from ..sources import REGISTRY
+from ..xlsx_export import XLSX_MEDIA_TYPE, build_workbook
 from .common import RATES_PREFIX, RATES_TAGS, HistoryQuery, resolve_sources_or_all
 
 router = APIRouter(prefix=RATES_PREFIX, tags=RATES_TAGS)
@@ -112,4 +113,28 @@ async def history_csv(
         csv_chunks(rows, sep),
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{name}"'},
+    )
+
+
+@router.get(
+    "/history.xlsx",
+    summary="Mismo histórico, como libro de Excel con hoja resumen, una hoja por fuente y gráfico",
+    response_class=Response,
+    responses={200: {"content": {XLSX_MEDIA_TYPE: {}}, "description": "Libro .xlsx"}},
+)
+async def history_xlsx(
+    q: Annotated[HistoryQuery, Query()],
+    value: CandleField = Query(
+        CandleField.close, description="Qué valor de la vela va en cada columna de la hoja Resumen"
+    ),
+    filename: str | None = None,
+):
+    ts_from, ts_to, names = q.resolve()
+    data = await _load_series(q, names, ts_from, ts_to)
+    content = await asyncio.to_thread(build_workbook, data, names, q.interval, value)
+    name = export_filename(filename, q.interval, ts_from, ts_to, ext="xlsx")
+    if not name.lower().endswith(".xlsx"):
+        name += ".xlsx"
+    return Response(
+        content, media_type=XLSX_MEDIA_TYPE, headers={"Content-Disposition": f'attachment; filename="{name}"'}
     )
