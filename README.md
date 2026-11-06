@@ -15,7 +15,7 @@ Ninguna API pública da histórico USDT/VES completo y sin límites, así que es
 
 `binance_p2p` es la fuente por defecto de `/history`. Binance no publica una API P2P oficial; el endpoint es el que usa su propia web y puede cambiar sin aviso. Si una fuente falla, el recolector sigue con las demás y anota el error en `last_status`.
 
-BCV y paralelo usan como timestamp la `fechaActualizacion` que devuelve DolarApi. El BCV publica una tasa por día hábil y `UNIQUE(source, ts)` evita guardarla 288 veces al día. Si esa fecha falta o no se puede leer, la consulta falla con `SourceError` en vez de inventar una con la hora actual.
+BCV y paralelo usan como timestamp la `fechaActualizacion` que devuelve DolarApi. El BCV publica una tasa por día hábil y `UNIQUE(source, ts)` evita guardarla otra vez en cada ciclo del recolector. Si esa fecha falta o no se puede leer, la consulta falla con `SourceError` en vez de inventar una con la hora actual.
 
 Para agregar una fuente, escriba una subclase de `RateSource` con `fetch()` y regístrela en `app/sources/__init__.py`.
 
@@ -197,9 +197,9 @@ Se guardan ticks y no velas. Cualquier agregación sale de los mismos datos, y c
 
 Días, semanas y meses se cortan en UTC-4 fijo. Venezuela no tiene horario de verano, y cortar en UTC partiría cada día a las 8 de la noche.
 
-Las cotas existen porque sin ellas una sola petición tumbaba el servicio. `start=0&interval=hour&fill=null` pedía decenas de millones de velas. Una fila importada con `timestamp=99999999999999` rompía `/latest`, `/sources` y `/stream` para siempre. Por eso `Tick` rechaza timestamps fuera de 1970 a 2100 y precios que no sean finitos y positivos.
+Las cotas impiden que una sola petición tumbe el servicio. Sin ellas, `start=0&interval=hour&fill=null` pediría decenas de millones de velas, y una fila importada con `timestamp=99999999999999` dejaría rotos `/latest`, `/sources` y `/stream` hasta borrarla a mano. Por eso `Tick` rechaza timestamps fuera de 1970 a 2100 y precios que no sean finitos y positivos.
 
-La clave de API protege las escrituras porque un POST multipart es una "simple request" para el navegador: cualquier página abierta en la misma red podía mandar `replace=true` y borrar el histórico.
+La clave de API protege las escrituras porque un POST multipart es una "simple request" para el navegador: sin clave, cualquier página abierta en la misma red podría mandar `replace=true` y borrar el histórico.
 
 ## Desarrollo
 
