@@ -135,10 +135,11 @@ def test_import_date_time_columns_and_empty_timestamp(client):
     assert r.json()["inserted"] == 1 and get_price(client, "bcv", 1_577_851_200 + 86400) == 6
 
 
-def test_import_ambiguous_price_rejected_without_delimiter_hint(client):
-    # tabulador: el delimitador no sugiere separador decimal → se rechaza en vez de adivinar
+def test_import_ambiguous_price_tab_delimited_uses_dot(client):
+    # tabulador: `history.csv?sep=%09` escribe decimal `.`, así que se reimporta con `.` como decimal
     r = _import(client, "fecha\tprecio\n2020-01-01\t1.234\n", source="bcv").json()
-    assert (r["inserted"], r["rejected"]) == (0, 1)
+    assert (r["inserted"], r["rejected"]) == (1, 0)
+    assert get_price(client, "bcv", 1_577_851_200) == 1.234
 
 
 def test_import_ambiguous_price_resolved_by_delimiter(client):

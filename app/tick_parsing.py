@@ -144,9 +144,9 @@ def _resolve_ambiguous(text: str, sep: str, decimal_hint: str | None) -> str | N
 def decimal_hint_for(delimiter: str) -> str | None:
     """Separador decimal implícito por el delimitador del CSV (así escribe `history.csv`).
 
-    `;` ⇒ decimal `,`; `,` ⇒ decimal `.`; cualquier otro ⇒ sin pista.
+    `;` ⇒ decimal `,`; `,` y tabulador ⇒ decimal `.`; cualquier otro ⇒ sin pista.
     """
-    return {";": ",", ",": "."}.get(delimiter)
+    return {";": ",", ",": ".", "\t": "."}.get(delimiter)
 
 
 def sniff_dialect(sample: str) -> type[csv.Dialect]:

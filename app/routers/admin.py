@@ -60,7 +60,7 @@ async def import_csv(
     - `date` (YYYY-MM-DD, ISO 8601, DD/MM/YYYY) **o** `timestamp` (epoch en s o ms)
     - `price` (o `close`, `rate`, `promedio`); acepta `1.234,56` y `1,5`. Para valores ambiguos
       (`1.234`, `36,512`) el delimitador decide el separador decimal: con `;` el decimal es `,`
-      y con `,` es `.` (igual que escribe `history.csv`), así que su propia exportación se reimporta.
+      y con `,` o tabulador es `.` (igual que escribe `history.csv`), así que su propia exportación se reimporta.
     - `source` (opcional si se pasa `?source=`)
     - `buy`, `sell` (opcionales → se guardan en `extra`)
 

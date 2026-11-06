@@ -182,7 +182,7 @@ def test_parse_price_decimal_hint(value, hint, expected):
     assert parse_price(value, decimal_hint=hint) == expected
 
 
-@pytest.mark.parametrize("delimiter, hint", [(";", ","), (",", "."), ("\t", None), ("|", None)])
+@pytest.mark.parametrize("delimiter, hint", [(";", ","), (",", "."), ("\t", "."), ("|", None)])
 def test_decimal_hint_for(delimiter, hint):
     assert decimal_hint_for(delimiter) == hint
 
