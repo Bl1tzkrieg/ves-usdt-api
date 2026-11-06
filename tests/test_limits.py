@@ -235,3 +235,19 @@ def test_seed_demo_runs_on_empty_db(monkeypatch):
         assert dbmod.get_db().sources()
     finally:
         dbmod.set_db(None)
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"end": "9999-12-31"},  # OverflowError al sumar el día inclusivo
+        {"end": "99999999999999"},  # epoch fuera de rango para local_iso
+        {"start": "2025-01-01", "end": "9999-12-31T00:00:00"},
+        {"start": "0", "end": "2025-01-01"},
+    ],
+)
+@pytest.mark.parametrize("path", [H, H + ".csv"])
+def test_out_of_range_dates_422(client, path, params):
+    r = client.get(path, params=params)
+    assert r.status_code == 422
+    assert "fecha fuera de rango" in r.json()["detail"].lower()

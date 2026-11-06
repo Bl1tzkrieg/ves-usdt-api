@@ -16,7 +16,7 @@ from .. import aggregation as agg
 from ..aggregation import Candle, Fill, Interval, Value
 from ..collector import CollectInProgress, collector
 from ..config import settings
-from ..db import get_db
+from ..db import MAX_TS, get_db
 from ..security import require_api_key
 from ..models import HistoryResponse, ImportResult, LatestPoint, SourceInfo
 from ..sources import DEFAULT_SOURCE, REGISTRY
@@ -35,9 +35,21 @@ def _parse_when(raw: str | None, *, end: bool) -> int | None:
     """Acepta 'YYYY-MM-DD', ISO 8601 con hora, o epoch en segundos.
 
     Una fecha sin hora se interpreta en hora local; para `end` es inclusiva (hasta fin del día).
+    Fuera de (0, MAX_TS) responde 422.
     """
     if raw is None or raw == "":
         return None
+    out_of_range = HTTPException(422, f"Fecha fuera de rango: {raw!r}. Debe estar entre 1970 y 2100.")
+    try:
+        ts = _parse_when_unchecked(raw, end=end)
+    except OverflowError as e:
+        raise out_of_range from e
+    if not 0 < ts < MAX_TS:
+        raise out_of_range
+    return ts
+
+
+def _parse_when_unchecked(raw: str, *, end: bool) -> int:
     if raw.isascii() and raw.isdigit():
         return int(raw)
     try:
