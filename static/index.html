@@ -3,73 +3,44 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>USDT / VES — Histórico</title>
-<script src="/static/chart.umd.min.js"></script>
-<style>
-  :root {
-    color-scheme: light dark;
-    --page: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
-    --grid: #e1e0d9; --axis: #c3c2b7; --border: rgba(11,11,11,.10);
-    --s-binance_p2p: #2a78d6; --s-yadio: #eb6834; --s-bcv: #1baf7a; --s-paralelo: #eda100;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --page: #0d0d0d; --surface: #1a1a19; --ink: #fff; --ink-2: #c3c2b7; --grid: #2c2c2a; --axis: #383835;
-      --border: rgba(255,255,255,.10);
-      --s-binance_p2p: #3987e5; --s-yadio: #d95926; --s-bcv: #199e70; --s-paralelo: #c98500;
-    }
-  }
-  * { box-sizing: border-box; }
-  body { margin: 0; padding: 20px 16px 40px; background: var(--page); color: var(--ink);
-         font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
-  h1 { font-size: 20px; margin: 0 0 4px; }
-  .sub { color: var(--ink-2); margin: 0 0 16px; }
-  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
-  .controls { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: flex-end; margin-bottom: 14px; }
-  .controls label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--ink-2); }
-  .controls input, .controls select, .controls button { font: inherit; padding: 6px 8px; border-radius: 6px;
-      border: 1px solid var(--axis); background: var(--surface); color: var(--ink); }
-  .presets { display: flex; gap: 6px; flex-wrap: wrap; }
-  .presets button, .actions button { cursor: pointer; }
-  .presets button[aria-pressed="true"] { border-color: var(--s-binance_p2p); font-weight: 600; }
-  .sources { display: flex; gap: 12px; flex-wrap: wrap; }
-  .sources label { flex-direction: row; align-items: center; gap: 6px; font-size: 13px; color: var(--ink); }
-  .swatch { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
-  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin-bottom: 14px; }
-  .tile { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
-  .tile .k { font-size: 12px; color: var(--ink-2); display: flex; align-items: center; gap: 6px; }
-  .tile .v { font-size: 22px; font-weight: 600; margin-top: 2px; }
-  .tile .d { font-size: 12px; color: var(--muted); }
-  .chart-wrap { position: relative; height: 420px; }
-  .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; align-items: center; }
-  .status { font-size: 12px; color: var(--muted); margin-left: auto; }
-  .live { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #0ca30c; margin-right: 6px; }
-  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; font-size: 13px; }
-  th, td { text-align: right; padding: 5px 8px; border-bottom: 1px solid var(--grid); }
-  th:first-child, td:first-child { text-align: left; }
-  th { color: var(--ink-2); font-weight: 600; position: sticky; top: 0; background: var(--surface); }
-  .table-wrap { max-height: 360px; overflow: auto; margin-top: 12px; }
-  [hidden] { display: none !important; }
-</style>
+<title>Bolívar por dólar</title>
+<link rel="stylesheet" href="/static/styles.css">
+<script src="/static/chart.umd.min.js" defer></script>
+<script src="/static/app.js" defer></script>
 </head>
 <body>
-<h1>Bolívar (VES) por 1 USDT / USD</h1>
-<p class="sub">Histórico y valor en vivo. Rango libre de fechas, agregación por hora/día/semana/mes, exportable a CSV.</p>
+<main class="page">
 
-<div class="tiles" id="tiles"></div>
+  <header class="masthead">
+    <div class="masthead-text">
+      <h1>Bolívares por dólar</h1>
+      <p class="lede">Tasas de Binance P2P, Yadio, BCV y el paralelo. Se actualiza solo mientras la página está abierta.</p>
+    </div>
+    <div class="hero" id="hero" aria-live="polite">
+      <span class="hero-label" id="hero-label">Brecha USDT contra BCV</span>
+      <span class="hero-value" id="hero-value">—</span>
+      <span class="hero-note" id="hero-note"></span>
+    </div>
+  </header>
 
-<div class="card">
-  <div class="controls">
-    <label>Rango rápido
-      <div class="presets" id="presets">
-        <button data-days="7">7 d</button><button data-days="30" aria-pressed="true">30 d</button>
-        <button data-days="90">90 d</button><button data-days="180">6 m</button>
-        <button data-days="365">1 a</button><button data-days="1095">3 a</button><button data-days="0">Todo</button>
+  <section class="tiles" id="tiles" aria-label="Último precio por fuente"></section>
+
+  <section class="filters" aria-label="Filtros">
+    <div class="field">
+      <span class="field-label" id="presets-label">Rango</span>
+      <div class="segmented" id="presets" role="group" aria-labelledby="presets-label">
+        <button type="button" data-days="7">7 d</button>
+        <button type="button" data-days="30" aria-pressed="true">30 d</button>
+        <button type="button" data-days="90">90 d</button>
+        <button type="button" data-days="180">6 m</button>
+        <button type="button" data-days="365">1 a</button>
+        <button type="button" data-days="1095">3 a</button>
+        <button type="button" data-days="0">Todo</button>
       </div>
-    </label>
-    <label>Desde <input type="date" id="start"></label>
-    <label>Hasta <input type="date" id="end"></label>
-    <label>Intervalo
+    </div>
+    <label class="field"><span class="field-label">Desde</span><input type="date" id="start"></label>
+    <label class="field"><span class="field-label">Hasta</span><input type="date" id="end"></label>
+    <label class="field"><span class="field-label">Intervalo</span>
       <select id="interval">
         <option value="raw">Sin agregar (ticks)</option>
         <option value="hour">Hora</option>
@@ -78,31 +49,67 @@
         <option value="month">Mes</option>
       </select>
     </label>
-    <label>Valor
+    <label class="field"><span class="field-label">Valor</span>
       <select id="value">
-        <option value="close" selected>Cierre</option><option value="avg">Promedio</option>
-        <option value="open">Apertura</option><option value="high">Máximo</option><option value="low">Mínimo</option>
+        <option value="close" selected>Cierre</option>
+        <option value="avg">Promedio</option>
+        <option value="open">Apertura</option>
+        <option value="high">Máximo</option>
+        <option value="low">Mínimo</option>
       </select>
     </label>
-    <label>Huecos
+    <label class="field"><span class="field-label">Huecos</span>
       <select id="fill">
-        <option value="none">Omitir</option><option value="forward" selected>Repetir último</option><option value="null">Dejar vacío</option>
+        <option value="none">Omitir</option>
+        <option value="forward" selected>Repetir último</option>
+        <option value="null">Dejar vacío</option>
       </select>
     </label>
-    <label>Fuentes <div class="sources" id="sources"></div></label>
+    <fieldset class="field sources-field">
+      <legend class="field-label">Fuentes</legend>
+      <div class="sources" id="sources"></div>
+    </fieldset>
+  </section>
+
+  <section class="panel panel-main" id="panel-main">
+    <div class="panel-head">
+      <h2>Tipo de cambio</h2>
+      <p class="panel-sub" id="main-sub">Bolívares por unidad</p>
+    </div>
+    <p class="empty" id="main-empty" hidden></p>
+    <div class="chart-box chart-box-main"><canvas id="chart" role="img" aria-label="Serie temporal del tipo de cambio por fuente"></canvas></div>
+  </section>
+
+  <div class="panel-pair">
+    <section class="panel" id="panel-daily">
+      <div class="panel-head">
+        <h2>Variación diaria</h2>
+        <p class="panel-sub" id="daily-sub">Cierre contra cierre del día anterior, en %</p>
+      </div>
+      <p class="empty" id="daily-empty" hidden></p>
+      <div class="chart-box"><canvas id="chart-daily" role="img" aria-label="Variación diaria en porcentaje"></canvas></div>
+    </section>
+    <section class="panel" id="panel-spread">
+      <div class="panel-head">
+        <h2>Brecha contra BCV</h2>
+        <p class="panel-sub" id="spread-sub">Cuánto más cuesta el USDT que el dólar oficial, en %</p>
+      </div>
+      <p class="empty" id="spread-empty" hidden></p>
+      <div class="chart-box"><canvas id="chart-spread" role="img" aria-label="Brecha entre USDT y BCV en porcentaje"></canvas></div>
+    </section>
   </div>
 
-  <div class="chart-wrap"><canvas id="chart" role="img" aria-label="Serie temporal del tipo de cambio"></canvas></div>
+  <section class="actions" aria-label="Exportar">
+    <button type="button" id="csv-long">CSV con detalle OHLC</button>
+    <button type="button" id="csv-wide">CSV con una columna por fuente</button>
+    <button type="button" id="xlsx" data-pending="true" aria-disabled="true" title="disponible pronto">Excel</button>
+    <button type="button" id="pdf" data-pending="true" aria-disabled="true" title="disponible pronto">Informe PDF del mes</button>
+    <button type="button" id="toggle-table" aria-pressed="false" aria-controls="table-wrap">Ver tabla</button>
+    <p class="status" id="status" aria-live="polite"></p>
+  </section>
 
-  <div class="actions">
-    <button id="csv-long">Descargar CSV (detalle OHLC)</button>
-    <button id="csv-wide">Descargar CSV (una columna por fuente)</button>
-    <button id="toggle-table" aria-pressed="false">Ver tabla</button>
-    <span class="status" id="status"></span>
-  </div>
-  <div class="table-wrap" id="table-wrap" hidden></div>
-</div>
+  <section class="table-wrap" id="table-wrap" hidden aria-label="Datos en tabla"></section>
 
-<script src="/static/app.js"></script>
+</main>
 </body>
 </html>
