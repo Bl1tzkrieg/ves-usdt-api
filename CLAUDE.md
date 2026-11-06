@@ -49,7 +49,8 @@ python -m scripts.backfill csv --source bcv --file bcv.csv
 | `app/sources/` | Una clase `RateSource` por fuente y el `REGISTRY` |
 | `scripts/backfill.py` | Carga histórica: modos `yadio`, `json`, `pydolarve`, `csv`, `peek` |
 | `scripts/seed_demo.py` | Datos sintéticos para desarrollo |
-| `static/` | `index.html`, `app.js` y Chart.js vendorizado. Nada de JS inline: la CSP lo bloquea |
+| `scripts/screenshot.py` | Levanta la app con datos sintéticos y captura la página en claro, oscuro y móvil en `docs/screenshots/` |
+| `static/` | `index.html`, `styles.css`, `app.js` y Chart.js vendorizado. Nada de JS inline: la CSP lo bloquea |
 
 ## Planes
 
