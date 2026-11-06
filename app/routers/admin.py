@@ -6,9 +6,11 @@ import asyncio
 import csv
 import io
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
 
 from .. import aggregation as agg
+from ..backfill_sources import BackfillError, fetch_yadio_history
 from ..collector import CollectInProgress, collector
 from ..config import settings
 from ..db import get_db
@@ -29,6 +31,29 @@ router = APIRouter(prefix=RATES_PREFIX, tags=RATES_TAGS)
 
 IMPORT_REJECTED_SAMPLE = 10
 _READ_CHUNK = 1 << 20  # 1 MiB
+
+
+def _client_factory() -> httpx.AsyncClient:
+    """Cliente HTTP para el histórico externo; las pruebas lo sustituyen por un transporte simulado."""
+    return httpx.AsyncClient(timeout=settings.http_timeout_seconds, follow_redirects=True)
+
+
+@router.post(
+    "/backfill/yadio",
+    summary="Cargar el histórico diario de Yadio (pensado para planificadores como n8n)",
+    dependencies=[Depends(require_api_key)],
+)
+async def backfill_yadio(
+    days: int = Query(365, description="Días de histórico; se recorta al rango 1..365"),
+):
+    """Pide a Yadio un punto por día y lo inserta; los ticks ya existentes se ignoran (idempotente)."""
+    try:
+        async with _client_factory() as client:
+            result = await fetch_yadio_history(client, days)
+    except BackfillError as e:
+        raise HTTPException(502, str(e)) from e
+    inserted = await asyncio.to_thread(get_db().insert_ticks, result.ticks)
+    return {"received": len(result.ticks), "inserted": inserted, "skipped": result.skipped}
 
 
 @router.post(

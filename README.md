@@ -169,12 +169,18 @@ curl -o informe.pdf "localhost:8000/api/v1/rates/report.pdf?month=2026-10&source
 
 ### Escritura, con clave
 
-`POST /collect` y `POST /import` exigen la cabecera `X-API-Key` igual a `RATES_API_KEY`. Sin clave configurada responden 503; con una clave ausente o distinta, 401.
+`POST /collect`, `POST /import` y `POST /backfill/yadio` exigen la cabecera `X-API-Key` igual a `RATES_API_KEY`. Sin clave configurada responden 503; con una clave ausente o distinta, 401.
 
 `POST /collect` consulta todas las fuentes ahora. Si ya hay una recolección en curso responde 409. Si la última terminó hace menos de 30 segundos no consulta nada y devuelve `"skipped": true`, lo que impide usar el endpoint para martillar las APIs externas. La respuesta trae `skipped`, `collected` con lo obtenido y `status` por fuente.
 
 ```bash
 curl -X POST -H "X-API-Key: $RATES_API_KEY" localhost:8000/api/v1/rates/collect
+```
+
+`POST /backfill/yadio?days=365` pide a Yadio un punto por día (`days` se recorta a 1..365) y lo inserta; los días ya guardados se ignoran, así que repetirlo es inocuo. Está pensado para planificadores como n8n que mantienen el histórico al día sin acceso al disco. No lleva cuerpo. Responde `{"received": n, "inserted": m, "skipped": k}`, donde `skipped` cuenta los puntos de Yadio que no se pudieron interpretar. Si Yadio falla o responde algo inesperado, 502 con un detalle corto.
+
+```bash
+curl -X POST -H "X-API-Key: $RATES_API_KEY" "localhost:8000/api/v1/rates/backfill/yadio?days=365"
 ```
 
 `POST /import` recibe un CSV en el campo multipart `file`, con cabecera, en UTF-8. Parámetros: `source` fija la fuente cuando el CSV no trae columna `source`; `replace=true` borra antes, por cada fuente, los ticks entre la primera y la última fecha del archivo.
