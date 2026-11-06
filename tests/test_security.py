@@ -140,3 +140,89 @@ def test_index_keeps_full_csp(client):
     r = client.get("/")
     assert r.headers["content-security-policy"].startswith("default-src 'self'")
     assert r.headers["x-content-type-options"] == "nosniff"
+
+
+# ------------------------------------------------------------ ImportGuardMiddleware (antes del multipart)
+
+IMPORT = "/api/v1/rates/import"
+HUGE = str(10**12)
+
+
+@pytest.fixture()
+def multipart_spy(monkeypatch):
+    calls = []
+
+    async def spy(self):
+        calls.append(1)
+        raise AssertionError("el cuerpo multipart no debía leerse")
+
+    monkeypatch.setattr("starlette.formparsers.MultiPartParser.parse", spy)
+    return calls
+
+
+def _raw_post(client, headers, content=b"x"):
+    return client.post(IMPORT, params={"source": "bcv"}, content=content,
+                       headers={"Content-Type": "multipart/form-data; boundary=b", **headers})
+
+
+def test_import_guard_401_without_key_before_body(client, multipart_spy):
+    r = _raw_post(client, {"Content-Length": HUGE})
+    assert r.status_code == 401 and r.json() == {"detail": "API key inválida o ausente"}
+    r = _raw_post(client, {"Content-Length": HUGE, "X-API-Key": "mala"})
+    assert r.status_code == 401
+    assert multipart_spy == []
+
+
+def test_import_guard_503_when_key_unset(client, multipart_spy, monkeypatch):
+    monkeypatch.setattr("app.config.settings.api_key", "")
+    r = _raw_post(client, {"Content-Length": HUGE, "X-API-Key": ""})
+    assert r.status_code == 503 and "RATES_API_KEY" in r.json()["detail"]
+    assert multipart_spy == []
+
+
+def test_import_guard_413_with_key_over_cap(client, multipart_spy, monkeypatch):
+    monkeypatch.setattr("app.config.settings.import_max_bytes", 1000)
+    r = _raw_post(client, {"Content-Length": str(1000 + 64 * 1024 + 1), "X-API-Key": "k"})
+    assert r.status_code == 413 and "detail" in r.json()
+    assert multipart_spy == []
+
+
+def test_import_guard_411_without_content_length(client, multipart_spy):
+    def body():
+        yield b"x"
+
+    r = _raw_post(client, {"X-API-Key": "k"}, content=body())
+    assert r.status_code == 411 and "detail" in r.json()
+    assert multipart_spy == []
+
+
+def test_import_guard_asgi_never_reads_body(monkeypatch):
+    from app.security import ImportGuardMiddleware
+
+    monkeypatch.setattr("app.config.settings.api_key", "k")
+
+    async def run(headers):
+        sent = []
+
+        async def app_(scope, receive, send):
+            raise AssertionError("no debía llegar a la app")
+
+        async def receive():
+            raise AssertionError("el cuerpo no debía leerse")
+
+        async def send(message):
+            sent.append(message)
+
+        scope = {"type": "http", "method": "POST", "path": IMPORT, "headers": headers}
+        await ImportGuardMiddleware(app_)(scope, receive, send)
+        return sent[0]["status"]
+
+    assert asyncio.run(run([(b"x-api-key", b"k"), (b"content-length", b"abc")])) == 400
+    assert asyncio.run(run([(b"x-api-key", b"k"), (b"content-length", HUGE.encode())])) == 413
+    assert asyncio.run(run([(b"x-api-key", b"k")])) == 411
+    assert asyncio.run(run([(b"content-length", b"10")])) == 401
+
+
+def test_import_guard_ignores_other_routes(client):
+    # GET de lectura sin clave ni Content-Length sigue funcionando
+    assert client.get("/api/v1/rates/history").status_code == 200
