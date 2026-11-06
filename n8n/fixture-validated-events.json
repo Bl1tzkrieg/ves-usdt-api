@@ -1,0 +1,222 @@
+{
+  "id": "vesRatesAlertFixture01",
+  "name": "ves-rates: fixture de alertas (sin red)",
+  "active": false,
+  "nodes": [
+    {
+      "id": "f1e00000-0000-4000-8000-000000000001",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        200
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "f1e00000-0000-4000-8000-000000000002",
+      "name": "Stats válidos (con fuente repetida)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        100
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "return [{\"json\": {\"source\": \"binance_p2p\", \"label\": \"Binance P2P\", \"unit\": \"VES/USDT\", \"latest\": 650.5, \"latest_date\": \"2026-11-06T10:00:00-04:00\", \"change\": {\"24h\": {\"abs\": 26.25, \"pct\": 4.2, \"from_price\": 624.25, \"from_date\": \"2026-11-05T10:00:00-04:00\"}, \"7d\": null, \"30d\": null}, \"spread_vs_reference_pct\": 12.0}}, {\"json\": {\"source\": \"yadio\", \"label\": \"Yadio\", \"unit\": \"VES/USD\", \"latest\": 640.0, \"latest_date\": \"2026-11-06T09:55:00-04:00\", \"change\": {\"24h\": {\"abs\": -19.8, \"pct\": -3.0, \"from_price\": 659.8, \"from_date\": \"2026-11-05T09:55:00-04:00\"}, \"7d\": null, \"30d\": null}, \"spread_vs_reference_pct\": 10.3}}, {\"json\": {\"source\": \"bcv\", \"label\": \"BCV\", \"unit\": \"VES/USD\", \"latest\": 580.1, \"latest_date\": \"2026-11-06T00:00:00-04:00\", \"change\": {\"24h\": {\"abs\": 2.9, \"pct\": 0.5, \"from_price\": 577.2, \"from_date\": \"2026-11-05T00:00:00-04:00\"}, \"7d\": null, \"30d\": null}, \"spread_vs_reference_pct\": null}}, {\"json\": {\"source\": \"paralelo\", \"label\": \"Paralelo\", \"unit\": \"VES/USD\", \"latest\": 655.0, \"latest_date\": \"2026-11-06T09:00:00-04:00\", \"change\": {\"24h\": null, \"7d\": null, \"30d\": null}, \"spread_vs_reference_pct\": 12.9}}, {\"json\": {\"source\": \"binance_p2p\", \"label\": \"Binance P2P\", \"unit\": \"VES/USDT\", \"latest\": 650.5, \"latest_date\": \"2026-11-06T10:00:00-04:00\", \"change\": {\"24h\": {\"abs\": 26.25, \"pct\": 4.2, \"from_price\": 624.25, \"from_date\": \"2026-11-05T10:00:00-04:00\"}, \"7d\": null, \"30d\": null}, \"spread_vs_reference_pct\": 12.0}}];"
+      }
+    },
+    {
+      "id": "f1e00000-0000-4000-8000-000000000003",
+      "name": "Calcular alertas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        100
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Calcula las alertas de variación 24h a partir de la respuesta de GET /stats.\n// Umbral: RATES_ALERT_PCT (por defecto 3). Un valor vacío, no numérico o <= 0 usa 3.\n// Si la instancia bloquea $env (N8N_BLOCK_ENV_ACCESS_IN_NODE=true) se usan los valores por defecto.\nconst envVar = (name) => {\n  try {\n    return $env[name];\n  } catch (e) {\n    return undefined;\n  }\n};\nconst rawThreshold = Number.parseFloat(envVar('RATES_ALERT_PCT') ?? '');\nconst threshold = Number.isFinite(rawThreshold) && rawThreshold > 0 ? rawThreshold : 3;\nconst pageUrl = String(envVar('RATES_BASE_URL') ?? '').replace(/\\/+$/, '') + '/';\n\n// Deduplicación duradera: guarda source|latest_date ya avisados en los datos estáticos del flujo.\n// n8n solo persiste estos datos en ejecuciones de producción (flujo activo), no en pruebas manuales.\nconst staticData = $getWorkflowStaticData('global');\nconst alerted = staticData.alerted && typeof staticData.alerted === 'object' ? staticData.alerted : {};\nconst KEEP_MS = 7 * 24 * 3600 * 1000;\nconst nowMs = Date.now();\nfor (const [key, at] of Object.entries(alerted)) {\n  if (!(nowMs - Date.parse(at) < KEEP_MS)) delete alerted[key];\n}\n\nconst isNum = (v) => typeof v === 'number' && Number.isFinite(v);\nconst invalid = [];\nconst duplicates = [];\nconst alerts = [];\nconst seenSources = new Set();\nlet checked = 0;\n\n$input.all().forEach((item, index) => {\n  const s = item.json;\n  if (!s || typeof s !== 'object' || Object.keys(s).length === 0) return; // respuesta vacía: nada que revisar\n  const w = s.change && typeof s.change === 'object' ? s.change['24h'] : undefined;\n  if (typeof s.source !== 'string' || !s.source || !isNum(s.latest) || typeof s.latest_date !== 'string' || w === undefined) {\n    invalid.push({ index, reason: 'entrada de /stats sin source, latest, latest_date o change' });\n    return;\n  }\n  checked += 1;\n  if (w === null) return; // sin historia de 24 h\n  if (!isNum(w.pct) || !isNum(w.from_price) || typeof w.from_date !== 'string') {\n    invalid.push({ index, source: s.source, reason: 'change.24h sin pct, from_price o from_date numéricos' });\n    return;\n  }\n  if (Math.abs(w.pct) < threshold) return;\n  const key = s.source + '|' + s.latest_date;\n  if (seenSources.has(s.source) || alerted[key]) {\n    duplicates.push(key);\n    return;\n  }\n  seenSources.add(s.source);\n  alerts.push({\n    key,\n    source: s.source,\n    label: typeof s.label === 'string' && s.label ? s.label : s.source,\n    unit: typeof s.unit === 'string' ? s.unit : '',\n    price: s.latest,\n    latest_date: s.latest_date,\n    pct: w.pct,\n    abs: isNum(w.abs) ? w.abs : s.latest - w.from_price,\n    from_price: w.from_price,\n    from_date: w.from_date,\n  });\n});\n\nif (checked === 0 && invalid.length > 0) {\n  throw new Error('Respuesta de /stats malformada: ' + invalid.length + ' entradas inválidas, ninguna válida');\n}\n\nfor (const a of alerts) alerted[a.key] = new Date(nowMs).toISOString();\nstaticData.alerted = alerted;\nstaticData.statsDown = false;\n\nconst fmt = (n, d) => n.toLocaleString('es-VE', { minimumFractionDigits: d, maximumFractionDigits: d });\nconst lines = alerts.map((a) => {\n  const sign = a.pct > 0 ? '+' : '';\n  return '- ' + a.label + ': ' + fmt(a.price, 2) + ' ' + a.unit + ' (' + sign + fmt(a.pct, 2) + ' % en 24 h; antes ' +\n    fmt(a.from_price, 2) + ' el ' + a.from_date + '; último dato ' + a.latest_date + ')';\n});\nconst subject = '[ves-rates] Variación 24 h >= ' + threshold + ' %: ' + alerts.map((a) => a.source).join(', ');\nconst message = 'Variación fuerte en las tasas VES (umbral ' + threshold + ' %):\\n' + lines.join('\\n') + '\\n\\nVer: ' + pageUrl;\n\nreturn [{ json: { threshold, checked, alerts, duplicates, invalid, subject, message } }];\n"
+      }
+    },
+    {
+      "id": "f1e00000-0000-4000-8000-000000000004",
+      "name": "Misma respuesta otra vez",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        100
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "return $('Stats válidos (con fuente repetida)').all();"
+      }
+    },
+    {
+      "id": "f1e00000-0000-4000-8000-000000000005",
+      "name": "Calcular alertas (segundo tick)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        100
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Calcula las alertas de variación 24h a partir de la respuesta de GET /stats.\n// Umbral: RATES_ALERT_PCT (por defecto 3). Un valor vacío, no numérico o <= 0 usa 3.\n// Si la instancia bloquea $env (N8N_BLOCK_ENV_ACCESS_IN_NODE=true) se usan los valores por defecto.\nconst envVar = (name) => {\n  try {\n    return $env[name];\n  } catch (e) {\n    return undefined;\n  }\n};\nconst rawThreshold = Number.parseFloat(envVar('RATES_ALERT_PCT') ?? '');\nconst threshold = Number.isFinite(rawThreshold) && rawThreshold > 0 ? rawThreshold : 3;\nconst pageUrl = String(envVar('RATES_BASE_URL') ?? '').replace(/\\/+$/, '') + '/';\n\n// Deduplicación duradera: guarda source|latest_date ya avisados en los datos estáticos del flujo.\n// n8n solo persiste estos datos en ejecuciones de producción (flujo activo), no en pruebas manuales.\nconst staticData = $getWorkflowStaticData('global');\nconst alerted = staticData.alerted && typeof staticData.alerted === 'object' ? staticData.alerted : {};\nconst KEEP_MS = 7 * 24 * 3600 * 1000;\nconst nowMs = Date.now();\nfor (const [key, at] of Object.entries(alerted)) {\n  if (!(nowMs - Date.parse(at) < KEEP_MS)) delete alerted[key];\n}\n\nconst isNum = (v) => typeof v === 'number' && Number.isFinite(v);\nconst invalid = [];\nconst duplicates = [];\nconst alerts = [];\nconst seenSources = new Set();\nlet checked = 0;\n\n$input.all().forEach((item, index) => {\n  const s = item.json;\n  if (!s || typeof s !== 'object' || Object.keys(s).length === 0) return; // respuesta vacía: nada que revisar\n  const w = s.change && typeof s.change === 'object' ? s.change['24h'] : undefined;\n  if (typeof s.source !== 'string' || !s.source || !isNum(s.latest) || typeof s.latest_date !== 'string' || w === undefined) {\n    invalid.push({ index, reason: 'entrada de /stats sin source, latest, latest_date o change' });\n    return;\n  }\n  checked += 1;\n  if (w === null) return; // sin historia de 24 h\n  if (!isNum(w.pct) || !isNum(w.from_price) || typeof w.from_date !== 'string') {\n    invalid.push({ index, source: s.source, reason: 'change.24h sin pct, from_price o from_date numéricos' });\n    return;\n  }\n  if (Math.abs(w.pct) < threshold) return;\n  const key = s.source + '|' + s.latest_date;\n  if (seenSources.has(s.source) || alerted[key]) {\n    duplicates.push(key);\n    return;\n  }\n  seenSources.add(s.source);\n  alerts.push({\n    key,\n    source: s.source,\n    label: typeof s.label === 'string' && s.label ? s.label : s.source,\n    unit: typeof s.unit === 'string' ? s.unit : '',\n    price: s.latest,\n    latest_date: s.latest_date,\n    pct: w.pct,\n    abs: isNum(w.abs) ? w.abs : s.latest - w.from_price,\n    from_price: w.from_price,\n    from_date: w.from_date,\n  });\n});\n\nif (checked === 0 && invalid.length > 0) {\n  throw new Error('Respuesta de /stats malformada: ' + invalid.length + ' entradas inválidas, ninguna válida');\n}\n\nfor (const a of alerts) alerted[a.key] = new Date(nowMs).toISOString();\nstaticData.alerted = alerted;\nstaticData.statsDown = false;\n\nconst fmt = (n, d) => n.toLocaleString('es-VE', { minimumFractionDigits: d, maximumFractionDigits: d });\nconst lines = alerts.map((a) => {\n  const sign = a.pct > 0 ? '+' : '';\n  return '- ' + a.label + ': ' + fmt(a.price, 2) + ' ' + a.unit + ' (' + sign + fmt(a.pct, 2) + ' % en 24 h; antes ' +\n    fmt(a.from_price, 2) + ' el ' + a.from_date + '; último dato ' + a.latest_date + ')';\n});\nconst subject = '[ves-rates] Variación 24 h >= ' + threshold + ' %: ' + alerts.map((a) => a.source).join(', ');\nconst message = 'Variación fuerte en las tasas VES (umbral ' + threshold + ' %):\\n' + lines.join('\\n') + '\\n\\nVer: ' + pageUrl;\n\nreturn [{ json: { threshold, checked, alerts, duplicates, invalid, subject, message } }];\n"
+      }
+    },
+    {
+      "id": "f1e00000-0000-4000-8000-000000000006",
+      "name": "Stats malformados",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        100
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "return [{\"json\": {\"detail\": \"Internal Server Error\"}}, {\"json\": {\"source\": \"bcv\", \"latest\": \"580,1\"}}];"
+      }
+    },
+    {
+      "id": "f1e00000-0000-4000-8000-000000000007",
+      "name": "Calcular alertas (malformado)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1440,
+        100
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Calcula las alertas de variación 24h a partir de la respuesta de GET /stats.\n// Umbral: RATES_ALERT_PCT (por defecto 3). Un valor vacío, no numérico o <= 0 usa 3.\n// Si la instancia bloquea $env (N8N_BLOCK_ENV_ACCESS_IN_NODE=true) se usan los valores por defecto.\nconst envVar = (name) => {\n  try {\n    return $env[name];\n  } catch (e) {\n    return undefined;\n  }\n};\nconst rawThreshold = Number.parseFloat(envVar('RATES_ALERT_PCT') ?? '');\nconst threshold = Number.isFinite(rawThreshold) && rawThreshold > 0 ? rawThreshold : 3;\nconst pageUrl = String(envVar('RATES_BASE_URL') ?? '').replace(/\\/+$/, '') + '/';\n\n// Deduplicación duradera: guarda source|latest_date ya avisados en los datos estáticos del flujo.\n// n8n solo persiste estos datos en ejecuciones de producción (flujo activo), no en pruebas manuales.\nconst staticData = $getWorkflowStaticData('global');\nconst alerted = staticData.alerted && typeof staticData.alerted === 'object' ? staticData.alerted : {};\nconst KEEP_MS = 7 * 24 * 3600 * 1000;\nconst nowMs = Date.now();\nfor (const [key, at] of Object.entries(alerted)) {\n  if (!(nowMs - Date.parse(at) < KEEP_MS)) delete alerted[key];\n}\n\nconst isNum = (v) => typeof v === 'number' && Number.isFinite(v);\nconst invalid = [];\nconst duplicates = [];\nconst alerts = [];\nconst seenSources = new Set();\nlet checked = 0;\n\n$input.all().forEach((item, index) => {\n  const s = item.json;\n  if (!s || typeof s !== 'object' || Object.keys(s).length === 0) return; // respuesta vacía: nada que revisar\n  const w = s.change && typeof s.change === 'object' ? s.change['24h'] : undefined;\n  if (typeof s.source !== 'string' || !s.source || !isNum(s.latest) || typeof s.latest_date !== 'string' || w === undefined) {\n    invalid.push({ index, reason: 'entrada de /stats sin source, latest, latest_date o change' });\n    return;\n  }\n  checked += 1;\n  if (w === null) return; // sin historia de 24 h\n  if (!isNum(w.pct) || !isNum(w.from_price) || typeof w.from_date !== 'string') {\n    invalid.push({ index, source: s.source, reason: 'change.24h sin pct, from_price o from_date numéricos' });\n    return;\n  }\n  if (Math.abs(w.pct) < threshold) return;\n  const key = s.source + '|' + s.latest_date;\n  if (seenSources.has(s.source) || alerted[key]) {\n    duplicates.push(key);\n    return;\n  }\n  seenSources.add(s.source);\n  alerts.push({\n    key,\n    source: s.source,\n    label: typeof s.label === 'string' && s.label ? s.label : s.source,\n    unit: typeof s.unit === 'string' ? s.unit : '',\n    price: s.latest,\n    latest_date: s.latest_date,\n    pct: w.pct,\n    abs: isNum(w.abs) ? w.abs : s.latest - w.from_price,\n    from_price: w.from_price,\n    from_date: w.from_date,\n  });\n});\n\nif (checked === 0 && invalid.length > 0) {\n  throw new Error('Respuesta de /stats malformada: ' + invalid.length + ' entradas inválidas, ninguna válida');\n}\n\nfor (const a of alerts) alerted[a.key] = new Date(nowMs).toISOString();\nstaticData.alerted = alerted;\nstaticData.statsDown = false;\n\nconst fmt = (n, d) => n.toLocaleString('es-VE', { minimumFractionDigits: d, maximumFractionDigits: d });\nconst lines = alerts.map((a) => {\n  const sign = a.pct > 0 ? '+' : '';\n  return '- ' + a.label + ': ' + fmt(a.price, 2) + ' ' + a.unit + ' (' + sign + fmt(a.pct, 2) + ' % en 24 h; antes ' +\n    fmt(a.from_price, 2) + ' el ' + a.from_date + '; último dato ' + a.latest_date + ')';\n});\nconst subject = '[ves-rates] Variación 24 h >= ' + threshold + ' %: ' + alerts.map((a) => a.source).join(', ');\nconst message = 'Variación fuerte en las tasas VES (umbral ' + threshold + ' %):\\n' + lines.join('\\n') + '\\n\\nVer: ' + pageUrl;\n\nreturn [{ json: { threshold, checked, alerts, duplicates, invalid, subject, message } }];\n"
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "f1e00000-0000-4000-8000-000000000008",
+      "name": "Aceptado (no esperado)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1680,
+        0
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "f1e00000-0000-4000-8000-000000000009",
+      "name": "Rechazado (esperado)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1680,
+        200
+      ],
+      "parameters": {}
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Stats válidos (con fuente repetida)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Stats válidos (con fuente repetida)": {
+      "main": [
+        [
+          {
+            "node": "Calcular alertas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calcular alertas": {
+      "main": [
+        [
+          {
+            "node": "Misma respuesta otra vez",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Misma respuesta otra vez": {
+      "main": [
+        [
+          {
+            "node": "Calcular alertas (segundo tick)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calcular alertas (segundo tick)": {
+      "main": [
+        [
+          {
+            "node": "Stats malformados",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Stats malformados": {
+      "main": [
+        [
+          {
+            "node": "Calcular alertas (malformado)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calcular alertas (malformado)": {
+      "main": [
+        [
+          {
+            "node": "Aceptado (no esperado)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Rechazado (esperado)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Caracas"
+  },
+  "pinData": {}
+}

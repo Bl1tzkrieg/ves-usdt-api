@@ -54,6 +54,7 @@ python -m scripts.backfill csv --source bcv --file bcv.csv
 | `scripts/backfill.py` | Carga histórica: modos `yadio`, `json`, `pydolarve`, `csv`, `peek` |
 | `scripts/seed_demo.py` | Datos sintéticos para desarrollo |
 | `scripts/screenshot.py` | Levanta la app con datos sintéticos y captura la página en claro, oscuro y móvil en `docs/screenshots/` |
+| `n8n/` | Flujo n8n (backfill diario y alertas horarias), su README, el plan de prueba y un fixture manual sin red; `tests/test_n8n_workflow.py` lo valida |
 | `tests/conftest.py` | Fixture `client` con BD en memoria y 10 días de ticks desde `T0`, compartido por las pruebas de API |
 | `static/` | `index.html`, `styles.css`, `app.js` y Chart.js vendorizado. Nada de JS inline: la CSP lo bloquea |
 

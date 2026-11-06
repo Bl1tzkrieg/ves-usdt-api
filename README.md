@@ -65,7 +65,7 @@ Todas las variables llevan el prefijo `RATES_` y se leen del entorno o de `.env`
 | `RATES_EXPORT_MAX_CELLS` | `400000` | Tope de celdas de `history.xlsx` (puntos por columnas de hoja). Mínimo 1000 |
 | `RATES_IMPORT_MAX_BYTES` | `10000000` | Tamaño máximo del CSV de `/import` |
 | `RATES_CORS_ORIGINS` | `[]` | Orígenes CORS permitidos. Vacío significa solo mismo origen |
-| `RATES_API_KEY` | vacío | Clave para `POST /import` y `POST /collect`. Vacía, ambos responden 503 |
+| `RATES_API_KEY` | vacío | Clave para `POST /import`, `POST /collect` y `POST /backfill/yadio`. Vacía, los tres responden 503 |
 
 ## Endpoints
 
@@ -177,7 +177,7 @@ curl -o informe.pdf "localhost:8000/api/v1/rates/report.pdf?month=2026-10&source
 curl -X POST -H "X-API-Key: $RATES_API_KEY" localhost:8000/api/v1/rates/collect
 ```
 
-`POST /backfill/yadio?days=365` pide a Yadio un punto por día (`days` se recorta a 1..365) y lo inserta; los días ya guardados se ignoran, así que repetirlo es inocuo. Está pensado para planificadores como n8n que mantienen el histórico al día sin acceso al disco. No lleva cuerpo. Responde `{"received": n, "inserted": m, "skipped": k}`, donde `skipped` cuenta los puntos de Yadio que no se pudieron interpretar. Si Yadio falla o responde algo inesperado, 502 con un detalle corto.
+`POST /backfill/yadio?days=365` pide a Yadio un punto por día (`days` se recorta a 1..365) y lo inserta; los días ya guardados se ignoran, así que repetirlo es inocuo. Está pensado para planificadores como n8n que mantienen el histórico al día sin acceso al disco. No lleva cuerpo. Responde `{"received": n, "inserted": m, "skipped": k}`, donde `received` cuenta los puntos válidos recibidos de Yadio, `inserted` los que eran nuevos y `skipped` los que no se pudieron interpretar. La consulta a Yadio usa `RATES_HTTP_TIMEOUT_SECONDS`. Si Yadio falla o responde algo inesperado, 502 con un detalle corto.
 
 ```bash
 curl -X POST -H "X-API-Key: $RATES_API_KEY" "localhost:8000/api/v1/rates/backfill/yadio?days=365"
@@ -235,6 +235,8 @@ python -m scripts.backfill csv --source bcv --file bcv_2025.csv
 python -m scripts.backfill peek --url "https://..."
 ```
 
+Cada consulta HTTP del script tiene un timeout fijo de 60 segundos, más holgado que el de la API (`RATES_HTTP_TIMEOUT_SECONDS`), porque las respuestas históricas son grandes.
+
 En el modo `json` el script detecta por su cuenta dónde está la lista de puntos, sea una lista de pares `[ts, precio]`, una lista de objetos o un objeto que la contiene. Si no logra interpretar los puntos, imprime uno de ejemplo para que indique `--ts-key` y `--price-key`. `json` y `peek` aceptan `--header "Authorization: Bearer XXX"`, repetible.
 
 ## La página
@@ -289,6 +291,6 @@ Si tenía un cliente contra la versión inicial, esto rompe:
 - `seed_demo` se niega a escribir sobre una base con datos sin `--force`.
 - El contenedor ya no corre como root; ver la nota de Docker sobre carpetas del host.
 
-## Lo que viene
+## Automatización con n8n
 
-Está planificado, todavía no existe: un flujo de n8n que dispare recolecciones y backfill diarios y avise por variaciones fuertes (fase E). El detalle está en `docs/superpowers/plans/2026-11-06-hardening-quality-ui-exports-n8n.md`.
+`n8n/ves-rates-workflow.json` es un flujo de n8n 1.x, importado inactivo, que cada día a las 06:00 (America/Caracas) llama a `POST /collect` y `POST /backfill/yadio?days=7`, y cada hora lee `GET /stats` y avisa por Telegram y correo cuando una fuente varía en 24 h al menos `RATES_ALERT_PCT` % (3 por defecto). La clave va en una credencial de n8n, nunca en el JSON. Importación, variables, credenciales, activación y plan de prueba en [`n8n/README.md`](n8n/README.md).
