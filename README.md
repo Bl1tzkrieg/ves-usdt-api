@@ -121,6 +121,12 @@ curl -o tasas.csv "localhost:8000/api/v1/rates/history.csv?days=1095&sources=bin
 
 `GET /stream` es un stream SSE. Cada `every` segundos (defecto 15, entre 2 y 3600) revisa el último tick de `sources` y emite `event: rates` solo con las fuentes que cambiaron; si nada cambió manda un keepalive.
 
+### Resumen
+
+`GET /stats` devuelve, por fuente con datos (`sources` filtra, vacío = todas), el último precio y la variación `24h`, `7d` y `30d` (`abs`, `pct`, `from_price`, `from_date`). El precio de comparación es el último tick con `ts <= último - N días`; si no hay historia tan antigua la ventana vale `null`. `spread_vs_reference_pct` es `(último / último_referencia - 1) * 100` contra `reference` (defecto `bcv`), y `null` para la propia referencia o si ella no tiene datos.
+
+`GET /daily-change?source=&days=` (defecto `binance_p2p` y 30 días) da `[{date, pct}]`: variación cierre-a-cierre entre días consecutivos con datos, sobre velas diarias sin relleno.
+
 ### Escritura, con clave
 
 `POST /collect` y `POST /import` exigen la cabecera `X-API-Key` igual a `RATES_API_KEY`. Sin clave configurada responden 503; con una clave ausente o distinta, 401.
@@ -187,7 +193,20 @@ En el modo `json` el script detecta por su cuenta dónde está la lista de punto
 
 ## La página
 
-`http://localhost:8000/` sirve `static/index.html`: Chart.js vendorizado en `static/`, rangos rápidos o fechas libres, intervalo, valor, relleno, selección de fuentes, tabla y descarga CSV en `long` o `wide`. Se actualiza sola con `/stream`.
+`http://localhost:8000/` sirve `static/index.html`, con estilos en `static/styles.css` y Chart.js vendorizado en `static/`.
+
+![La página en tema claro](docs/screenshots/light.png)
+
+- Arriba, la brecha entre el USDT y el BCV como cifra principal.
+- Cuatro tiles con el último precio, la variación a 24 h y una sparkline.
+- Gráfica principal con rangos rápidos o fechas libres, intervalo, valor, relleno y selección de fuentes.
+- Paneles de variación diaria (%) y de spread contra el BCV.
+- Botones de descarga CSV en `long` o `wide`. Los de Excel y PDF se activan solos cuando existen `/history.xlsx` y `/report.pdf`.
+- Interruptor para ver los datos como tabla.
+- Se actualiza sola con `/stream` (SSE).
+- En intervalo Hora con relleno, "Todo" se limita a ~11 años: el servidor admite hasta 100000 cubos.
+
+`python scripts/screenshot.py` levanta la app con datos sintéticos y regenera las capturas de `docs/screenshots/` (necesita `pip install -r requirements-dev.txt` y `python -m playwright install chromium`, o el Chrome del sistema).
 
 Todas las respuestas llevan `Content-Security-Policy` con `script-src 'self'`, además de `X-Content-Type-Options`, `X-Frame-Options: DENY` y `Referrer-Policy: no-referrer`. Por eso el JavaScript de la página está en `static/app.js` y no en un `<script>` inline. `/docs`, `/redoc` y `/openapi.json` quedan sin CSP porque Swagger y ReDoc cargan desde un CDN.
 

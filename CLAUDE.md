@@ -37,17 +37,20 @@ python -m scripts.backfill csv --source bcv --file bcv.csv
 | `app/csv_export.py` | Filas raw, long y wide, formato numérico, emisión por bloques, nombre de archivo |
 | `app/tick_parsing.py` | Parser de fechas, precios y filas a `Tick`, compartido por `/import` y `scripts/backfill.py` |
 | `app/security.py` | `require_api_key`, `ImportGuardMiddleware` y cabeceras de seguridad con CSP |
+| `app/stats.py` | Variaciones 24h/7d/30d, spread contra referencia y variación diaria |
 | `app/sse.py` | Formato de eventos SSE |
 | `app/collector.py` | Recolector en segundo plano con lock y separación mínima de 30 s |
 | `app/models.py` | Modelos Pydantic de respuesta |
 | `app/routers/common.py` | Prefijo, resolución de fuentes y `HistoryQuery` |
 | `app/routers/history.py` | `/sources`, `/latest`, `/history`, `/history.csv` |
 | `app/routers/stream.py` | `/stream` por SSE |
+| `app/routers/stats.py` | `/stats`, `/daily-change` |
 | `app/routers/admin.py` | `/collect`, `/collector`, `/import` |
 | `app/sources/` | Una clase `RateSource` por fuente y el `REGISTRY` |
 | `scripts/backfill.py` | Carga histórica: modos `yadio`, `json`, `pydolarve`, `csv`, `peek` |
 | `scripts/seed_demo.py` | Datos sintéticos para desarrollo |
-| `static/` | `index.html`, `app.js` y Chart.js vendorizado. Nada de JS inline: la CSP lo bloquea |
+| `scripts/screenshot.py` | Levanta la app con datos sintéticos y captura la página en claro, oscuro y móvil en `docs/screenshots/` |
+| `static/` | `index.html`, `styles.css`, `app.js` y Chart.js vendorizado. Nada de JS inline: la CSP lo bloquea |
 
 ## Planes
 

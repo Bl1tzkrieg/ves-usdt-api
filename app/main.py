@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from .collector import collector
 from .config import settings
 from .db import get_db
-from .routers import admin, history, stream
+from .routers import admin, history, stats, stream
 from .security import ImportGuardMiddleware, SecurityHeadersMiddleware
 from .series import InvalidQuery
 
@@ -61,6 +61,7 @@ app.add_middleware(
 app.include_router(history.router)
 app.include_router(stream.router)
 app.include_router(admin.router)
+app.include_router(stats.router)
 
 
 @app.exception_handler(InvalidQuery)
