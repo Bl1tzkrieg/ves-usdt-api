@@ -6,8 +6,8 @@ import math
 import re
 from collections.abc import Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass, field
-from functools import partial
 from datetime import datetime
+from functools import partial
 from typing import Any
 
 from .aggregation import LOCAL_TZ
@@ -47,7 +47,7 @@ def parse_ts(value: Any, *, fmt: str | None = None) -> int | None:
     text = str(value).strip()
     if not text:
         return None
-    if len(text) == 8 and text.isascii() and text.isdigit():
+    if _is_compact_date(text):
         try:
             return int(datetime.strptime(text, "%Y%m%d").replace(tzinfo=LOCAL_TZ).timestamp())
         except ValueError:
@@ -73,6 +73,10 @@ def parse_ts(value: Any, *, fmt: str | None = None) -> int | None:
     return int(parsed.timestamp())
 
 
+def _is_compact_date(text: str) -> bool:
+    return len(text) == 8 and text.isascii() and text.isdigit()
+
+
 def _is_numeric_text(text: str) -> bool:
     return text.replace(".", "", 1).isdigit()
 
@@ -83,7 +87,7 @@ def _parse_row_ts(value: Any) -> int | None:
     if ts is None or ts >= MIN_PLAUSIBLE_TS:
         return ts
     text = str(value).strip()
-    if isinstance(value, (int, float)) or (_is_numeric_text(text) and len(text) != 8):
+    if isinstance(value, (int, float)) or (_is_numeric_text(text) and not _is_compact_date(text)):
         raise ValueError(f"timestamp fuera de rango plausible: {value!r}")
     return ts
 

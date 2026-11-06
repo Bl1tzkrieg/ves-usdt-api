@@ -198,7 +198,7 @@ def test_rows_to_ticks_decimal_hint_applies_to_price_and_extra():
     assert (res.ticks[0].price, res.ticks[0].extra) == (36.512, {"buy": 1234.0})
 
 
-@pytest.mark.parametrize("raw", ["43831", 43831, "43831.5", 946_684_799, "0"])
+@pytest.mark.parametrize("raw", ["43831", 43831, "43831.5", 946_684_799, "0", "1234567."])
 def test_rows_to_ticks_rejects_implausible_numeric_timestamps(raw):
     # serial de Excel (43831 = 2020-01-01) o epoch anterior a 2000-01-01 UTC
     res = rows_to_ticks([{"timestamp": raw, "price": "5"}], default_source="bcv", allowed_sources={"bcv"})
