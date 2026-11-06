@@ -196,6 +196,13 @@ def test_import_guard_411_without_content_length(client, multipart_spy):
     assert multipart_spy == []
 
 
+def test_import_guard_411_with_transfer_encoding(client, multipart_spy):
+    # aunque traiga un Content-Length válido: con Transfer-Encoding el tamaño declarado no es fiable
+    r = _raw_post(client, {"X-API-Key": "k", "Content-Length": "1", "Transfer-Encoding": "chunked"})
+    assert r.status_code == 411 and "Transfer-Encoding" in r.json()["detail"]
+    assert multipart_spy == []
+
+
 def test_import_guard_asgi_never_reads_body(monkeypatch):
     from app.security import ImportGuardMiddleware
 
@@ -220,6 +227,8 @@ def test_import_guard_asgi_never_reads_body(monkeypatch):
     assert asyncio.run(run([(b"x-api-key", b"k"), (b"content-length", b"abc")])) == 400
     assert asyncio.run(run([(b"x-api-key", b"k"), (b"content-length", HUGE.encode())])) == 413
     assert asyncio.run(run([(b"x-api-key", b"k")])) == 411
+    assert asyncio.run(run([(b"x-api-key", b"k"), (b"transfer-encoding", b"chunked"), (b"content-length", b"10")])) == 411
+    assert asyncio.run(run([(b"transfer-encoding", b"chunked")])) == 401
     assert asyncio.run(run([(b"content-length", b"10")])) == 401
 
 
