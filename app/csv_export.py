@@ -1,4 +1,5 @@
 """Exportación CSV de series: filas raw/long/wide, formato numérico y emisión por bloques."""
+
 from __future__ import annotations
 
 import csv
@@ -35,8 +36,14 @@ def raw_rows(data: Series, decimal_sep: str) -> Iterator[list]:
     for source, points in data.items():
         for p in points:
             ex = p.get("extra") or {}
-            yield [source, p["date"], p["t"], format_number(p["price"], decimal_sep),
-                   format_number(ex.get("buy"), decimal_sep), format_number(ex.get("sell"), decimal_sep)]
+            yield [
+                source,
+                p["date"],
+                p["t"],
+                format_number(p["price"], decimal_sep),
+                format_number(ex.get("buy"), decimal_sep),
+                format_number(ex.get("sell"), decimal_sep),
+            ]
 
 
 def long_rows(data: Series, interval: Interval, decimal_sep: str) -> Iterator[list]:
@@ -44,23 +51,33 @@ def long_rows(data: Series, interval: Interval, decimal_sep: str) -> Iterator[li
     yield ["source", "date", "timestamp", "open", "high", "low", "close", "avg", "count", "filled"]
     for source, candles in data.items():
         for c in candles:
-            yield [source, _row_date(c["date"], interval), c["t"],
-                   *(format_number(c[k], decimal_sep) for k in ("open", "high", "low", "close", "avg")),
-                   c["count"], int(c["filled"])]
+            yield [
+                source,
+                _row_date(c["date"], interval),
+                c["t"],
+                *(format_number(c[k], decimal_sep) for k in ("open", "high", "low", "close", "avg")),
+                c["count"],
+                int(c["filled"]),
+            ]
 
 
 def wide_rows(data: Series, interval: Interval, field: CandleField, decimal_sep: str) -> Iterator[list]:
-    """Una columna por fuente, alineadas por inicio de cubeta; celda vacía si la fuente no tiene esa cubeta."""
+    """Una columna por fuente, alineadas por inicio de cubeta; celda vacía si falta la cubeta."""
     names = list(data)
     all_t = sorted({c["t"] for candles in data.values() for c in candles})
     by_t = {n: {c["t"]: c for c in candles} for n, candles in data.items()}
     yield ["date", "timestamp", *names]
     for t in all_t:
-        yield [_row_date(agg.local_iso(t), interval), t,
-               *(format_number(by_t[n][t][field.value], decimal_sep) if t in by_t[n] else "" for n in names)]
+        yield [
+            _row_date(agg.local_iso(t), interval),
+            t,
+            *(format_number(by_t[n][t][field.value], decimal_sep) if t in by_t[n] else "" for n in names),
+        ]
 
 
-def csv_rows(data: Series, interval: Interval, layout: Layout, field: CandleField, decimal_sep: str) -> Iterator[list]:
+def csv_rows(
+    data: Series, interval: Interval, layout: Layout, field: CandleField, decimal_sep: str
+) -> Iterator[list]:
     """Filas (cabecera incluida) según el intervalo y el `layout` (long | wide)."""
     if interval is Interval.raw:
         return raw_rows(data, decimal_sep)

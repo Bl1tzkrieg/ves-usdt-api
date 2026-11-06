@@ -1,4 +1,5 @@
 """Formato Server-Sent Events."""
+
 from __future__ import annotations
 
 import json

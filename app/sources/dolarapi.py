@@ -3,6 +3,7 @@
 GET https://ve.dolarapi.com/v1/dolares/oficial
     {"moneda":"USD","fuente":"oficial","promedio":832.4883,"fechaActualizacion":"2026-09-11T00:00:00-04:00"}
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -33,7 +34,9 @@ class _DolarApiSource(RateSource):
         try:
             dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
         except ValueError as e:
-            raise SourceError(f"DolarApi/{self.slug} con 'fechaActualizacion' inválida: {str(raw)[:200]!r}") from e
+            raise SourceError(
+                f"DolarApi/{self.slug} con 'fechaActualizacion' inválida: {str(raw)[:200]!r}"
+            ) from e
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=LOCAL_TZ)
         ts = int(dt.timestamp())

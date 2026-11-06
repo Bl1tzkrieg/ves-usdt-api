@@ -1,4 +1,5 @@
 """Construcción de series de precios: interpretación de fechas/rangos y armado de velas o puntos raw."""
+
 from __future__ import annotations
 
 import time

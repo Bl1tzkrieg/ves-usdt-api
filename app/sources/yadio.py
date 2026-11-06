@@ -2,6 +2,7 @@
 
 GET https://api.yadio.io/rate/VES/USD  ->  {"rate": 938.9177, "timestamp": 1788954013210, ...}
 """
+
 from __future__ import annotations
 
 import httpx

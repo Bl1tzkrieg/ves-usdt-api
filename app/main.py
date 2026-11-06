@@ -4,6 +4,7 @@ Arranque:  uvicorn app.main:app --reload
 Docs:      http://localhost:8000/docs
 Gráfica:   http://localhost:8000/
 """
+
 from __future__ import annotations
 
 import logging

@@ -4,6 +4,7 @@ Un *tick* es una observación puntual: (fuente, timestamp UTC en segundos, preci
 Con esto se puede reconstruir cualquier agregación (hora, día, semana, mes) sobre cualquier rango
 sin límite de días: el costo es proporcional a la cantidad de ticks en el rango, no al rango en sí.
 """
+
 from __future__ import annotations
 
 import json
@@ -11,8 +12,9 @@ import math
 import os
 import sqlite3
 import threading
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from typing import Any, Iterable, Sequence
+from typing import Any
 
 from .config import settings
 
@@ -64,8 +66,7 @@ class Database:
     # ------------------------------------------------------------------ escritura
     def insert_ticks(self, ticks: Iterable[Tick]) -> int:
         rows = [
-            (t.source, int(t.ts), float(t.price), json.dumps(t.extra) if t.extra else None)
-            for t in ticks
+            (t.source, int(t.ts), float(t.price), json.dumps(t.extra) if t.extra else None) for t in ticks
         ]
         if not rows:
             return 0
@@ -78,8 +79,7 @@ class Database:
     def replace_ticks(self, ticks: Sequence[Tick]) -> int:
         """Borra el rango [min ts, max ts] de cada fuente e inserta `ticks`, todo en una transacción."""
         rows = [
-            (t.source, int(t.ts), float(t.price), json.dumps(t.extra) if t.extra else None)
-            for t in ticks
+            (t.source, int(t.ts), float(t.price), json.dumps(t.extra) if t.extra else None) for t in ticks
         ]
         if not rows:
             return 0
@@ -114,7 +114,8 @@ class Database:
         params: list[Any] = []
         where = ""
         if sources:
-            where = "WHERE source IN (%s)" % ",".join("?" * len(sources))
+            placeholders = ",".join("?" * len(sources))
+            where = f"WHERE source IN ({placeholders})"
             params.extend(sources)
         with self._lock:
             cur = self._conn.execute(sql.format(where=where), params)
@@ -132,13 +133,16 @@ class Database:
     def last_before(self, source: str, ts: int) -> Tick | None:
         with self._lock:
             cur = self._conn.execute(
-                "SELECT source, ts, price, extra FROM ticks WHERE source = ? AND ts < ? ORDER BY ts DESC LIMIT 1",
+                "SELECT source, ts, price, extra FROM ticks "
+                "WHERE source = ? AND ts < ? ORDER BY ts DESC LIMIT 1",
                 (source, ts),
             )
             r = cur.fetchone()
             return _row_to_tick(r) if r else None
 
-    def buckets(self, source: str, ts_from: int, ts_to: int, bucket_seconds: int, offset_seconds: int) -> list[dict[str, Any]]:
+    def buckets(
+        self, source: str, ts_from: int, ts_to: int, bucket_seconds: int, offset_seconds: int
+    ) -> list[dict[str, Any]]:
         """Agrega ticks en cubetas de tamaño fijo (hora, día) alineadas a la zona horaria local.
 
         La cubeta se identifica por su inicio en epoch UTC. Devuelve OHLC + promedio + conteo.

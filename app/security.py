@@ -1,4 +1,5 @@
 """Seguridad: API key para endpoints de escritura y cabeceras de seguridad."""
+
 from __future__ import annotations
 
 import hmac
@@ -103,7 +104,10 @@ class SecurityHeadersMiddleware:
         async def send_with_headers(message: Message) -> None:
             if message["type"] == "http.response.start":
                 present = {k.lower() for k, _ in message.get("headers", [])}
-                message["headers"] = [*message.get("headers", []), *(h for h in headers if h[0] not in present)]
+                message["headers"] = [
+                    *message.get("headers", []),
+                    *(h for h in headers if h[0] not in present),
+                ]
             await send(message)
 
         await self.app(scope, receive, send_with_headers)

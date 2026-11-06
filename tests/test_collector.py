@@ -1,4 +1,5 @@
 """Collector.collect_once: una fuente que falla no impide guardar las demás."""
+
 from __future__ import annotations
 
 import asyncio

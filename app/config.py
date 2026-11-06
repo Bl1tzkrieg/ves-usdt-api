@@ -1,4 +1,5 @@
 """Configuración por variables de entorno (prefijo RATES_)."""
+
 from __future__ import annotations
 
 from pydantic import Field
@@ -17,9 +18,7 @@ class Settings(BaseSettings):
     # Recolector en segundo plano
     collector_enabled: bool = True
     collector_interval_seconds: int = Field(300, ge=30)  # cada 5 minutos (mínimo 30 s)
-    collector_sources: list[str] = Field(
-        default_factory=lambda: ["binance_p2p", "yadio", "bcv", "paralelo"]
-    )
+    collector_sources: list[str] = Field(default_factory=lambda: ["binance_p2p", "yadio", "bcv", "paralelo"])
     http_timeout_seconds: float = 15.0
 
     # Binance P2P: cuántos anuncios usar para la mediana

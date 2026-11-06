@@ -1,4 +1,5 @@
 """Parser compartido de ticks (API /import y scripts/backfill)."""
+
 from __future__ import annotations
 
 import csv
@@ -138,7 +139,9 @@ def test_rows_to_ticks_explicit_keys_and_pairs():
 
 
 def test_rows_to_ticks_ambiguous_price_rejected_with_reason():
-    res = rows_to_ticks([{"fecha": "2020-01-01", "precio": "1.234"}], default_source="bcv", allowed_sources={"bcv"})
+    res = rows_to_ticks(
+        [{"fecha": "2020-01-01", "precio": "1.234"}], default_source="bcv", allowed_sources={"bcv"}
+    )
     assert res.ticks == []
     assert res.rejected[0]["row"] == 1 and "precio" in res.rejected[0]["reason"]
 

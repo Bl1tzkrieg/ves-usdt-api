@@ -1,4 +1,5 @@
 """pytest -q  (usa una BD en memoria y fuentes simuladas; no toca la red)."""
+
 from __future__ import annotations
 
 import asyncio
@@ -38,7 +39,9 @@ def client(monkeypatch):
 
 
 def test_history_day_ohlc(client):
-    r = client.get("/api/v1/rates/history", params={"start": "2025-01-01", "end": "2025-01-03", "sources": "binance_p2p"})
+    r = client.get(
+        "/api/v1/rates/history", params={"start": "2025-01-01", "end": "2025-01-03", "sources": "binance_p2p"}
+    )
     assert r.status_code == 200
     pts = r.json()["series"][0]["points"]
     assert [p["date"][:10] for p in pts] == ["2025-01-01", "2025-01-02", "2025-01-03"]
@@ -48,47 +51,77 @@ def test_history_day_ohlc(client):
 
 def test_fill_forward_with_seed(client):
     # rango que empieza en fin de semana (día 5): BCV no tiene tick, se rellena con el del día 4
-    r = client.get("/api/v1/rates/history", params={"start": "2025-01-06", "end": "2025-01-08", "sources": "bcv", "fill": "forward"})
+    r = client.get(
+        "/api/v1/rates/history",
+        params={"start": "2025-01-06", "end": "2025-01-08", "sources": "bcv", "fill": "forward"},
+    )
     pts = r.json()["series"][0]["points"]
     assert pts[0]["filled"] is True and pts[0]["close"] == 94
     assert pts[2]["filled"] is False and pts[2]["close"] == 97
 
 
 def test_week_and_month_rollup(client):
-    r = client.get("/api/v1/rates/history", params={"days": 3650, "sources": "binance_p2p", "interval": "week"})
+    r = client.get(
+        "/api/v1/rates/history", params={"days": 3650, "sources": "binance_p2p", "interval": "week"}
+    )
     weeks = r.json()["series"][0]["points"]
     assert weeks[0]["date"][:10] == "2024-12-30"  # lunes
     assert sum(w["count"] for w in weeks) == 40
-    r = client.get("/api/v1/rates/history", params={"days": 3650, "sources": "binance_p2p", "interval": "month"})
+    r = client.get(
+        "/api/v1/rates/history", params={"days": 3650, "sources": "binance_p2p", "interval": "month"}
+    )
     assert len(r.json()["series"][0]["points"]) == 1
 
 
 def test_wide_range_within_limit(client):
-    r = client.get("/api/v1/rates/history", params={"start": "2010-01-01", "end": "2025-12-31", "sources": "binance_p2p"})
+    r = client.get(
+        "/api/v1/rates/history", params={"start": "2010-01-01", "end": "2025-12-31", "sources": "binance_p2p"}
+    )
     assert r.status_code == 200 and len(r.json()["series"][0]["points"]) == 10
 
 
 def test_csv_wide(client):
-    r = client.get("/api/v1/rates/history.csv", params={"start": "2025-01-01", "end": "2025-01-02", "sources": "binance_p2p,bcv", "layout": "wide", "sep": ";"})
+    r = client.get(
+        "/api/v1/rates/history.csv",
+        params={
+            "start": "2025-01-01",
+            "end": "2025-01-02",
+            "sources": "binance_p2p,bcv",
+            "layout": "wide",
+            "sep": ";",
+        },
+    )
     lines = r.text.strip().splitlines()
     assert lines[0] == "date;timestamp;binance_p2p;bcv"
     assert lines[1].startswith("2025-01-01;") and lines[1].endswith(";100,2;90")  # sep=';' => coma decimal
     assert "attachment" in r.headers["content-disposition"]
-    r = client.get("/api/v1/rates/history.csv", params={"start": "2025-01-01", "end": "2025-01-01", "sources": "binance_p2p", "layout": "wide"})
+    r = client.get(
+        "/api/v1/rates/history.csv",
+        params={"start": "2025-01-01", "end": "2025-01-01", "sources": "binance_p2p", "layout": "wide"},
+    )
     assert r.text.strip().splitlines()[1].endswith(",100.2")  # sep=',' => punto decimal
 
 
 def test_fill_forward_without_previous_omits_rows(client):
     # el rango empieza antes del primer tick: no hay nada que repetir, no se emiten filas vacías
-    r = client.get("/api/v1/rates/history", params={"start": "2024-12-25", "end": "2025-01-02", "sources": "bcv", "fill": "forward"})
+    r = client.get(
+        "/api/v1/rates/history",
+        params={"start": "2024-12-25", "end": "2025-01-02", "sources": "bcv", "fill": "forward"},
+    )
     pts = r.json()["series"][0]["points"]
     assert [p["date"][:10] for p in pts] == ["2025-01-01", "2025-01-02"]
-    r = client.get("/api/v1/rates/history", params={"start": "2024-12-30", "end": "2025-01-01", "sources": "bcv", "fill": "null"})
+    r = client.get(
+        "/api/v1/rates/history",
+        params={"start": "2024-12-30", "end": "2025-01-01", "sources": "bcv", "fill": "null"},
+    )
     assert [p["close"] for p in r.json()["series"][0]["points"]] == [None, None, 90]
 
 
 def test_validation_errors(client):
-    assert client.get("/api/v1/rates/history", params={"start": "2025-02-01", "end": "2025-01-01"}).status_code == 422
+    assert (
+        client.get("/api/v1/rates/history", params={"start": "2025-02-01", "end": "2025-01-01"}).status_code
+        == 422
+    )
     assert client.get("/api/v1/rates/history", params={"sources": "nope"}).status_code == 422
 
 
@@ -101,7 +134,9 @@ def _import(client, body, **params):
 def test_import_csv(client):
     r = _import(client, "fecha;precio\n2020-01-01;5,5\n2020-01-02;6\n", source="bcv")
     assert r.json() == {"received": 2, "inserted": 2, "duplicates": 0, "rejected": 0, "rejected_sample": []}
-    r = client.get("/api/v1/rates/history", params={"start": "2020-01-01", "end": "2020-01-02", "sources": "bcv"})
+    r = client.get(
+        "/api/v1/rates/history", params={"start": "2020-01-01", "end": "2020-01-02", "sources": "bcv"}
+    )
     assert [p["close"] for p in r.json()["series"][0]["points"]] == [5.5, 6]
     # reimportar: todo duplicado
     r = _import(client, "fecha;precio\n2020-01-01;5,5\n2020-01-02;6\n", source="bcv")
@@ -118,7 +153,11 @@ def test_import_thousands_and_rejected_rows(client):
 
 
 def get_price(client, source, ts):
-    row = dbmod.get_db()._conn.execute("SELECT price FROM ticks WHERE source=? AND ts=?", (source, ts)).fetchone()
+    row = (
+        dbmod.get_db()
+        ._conn.execute("SELECT price FROM ticks WHERE source=? AND ts=?", (source, ts))
+        .fetchone()
+    )
     return row[0] if row else None
 
 
@@ -143,7 +182,7 @@ def test_import_ambiguous_price_tab_delimited_uses_dot(client):
 
 
 def test_import_ambiguous_price_resolved_by_delimiter(client):
-    r = _import(client, "fecha,precio\n2020-01-01,\"1.234\"\n", source="bcv").json()
+    r = _import(client, 'fecha,precio\n2020-01-01,"1.234"\n', source="bcv").json()
     assert (r["inserted"], r["rejected"]) == (1, 0)
     assert get_price(client, "bcv", 1_577_851_200) == 1.234
     r = _import(client, "fecha;precio\n2020-01-02;1.234\n", source="bcv").json()
@@ -178,11 +217,21 @@ def test_import_replace_keeps_ticks_outside_range(client):
     _import(client, "fecha,precio\n2020-01-01,1\n2020-01-10,2\n2020-01-20,3\n", source="bcv")
     r = _import(client, "fecha,precio\n2020-01-05,9\n2020-01-12,9\n", source="bcv", replace="true")
     assert r.json()["inserted"] == 2
-    rows = dbmod.get_db()._conn.execute("SELECT ts, price FROM ticks WHERE source='bcv' AND ts < ? ORDER BY ts", (T0,)).fetchall()
-    assert [r[1] for r in rows] == [1, 9, 9, 3]  # 01-01 y 01-20 fuera del rango se conservan; 01-10 reemplazado
+    rows = (
+        dbmod.get_db()
+        ._conn.execute("SELECT ts, price FROM ticks WHERE source='bcv' AND ts < ? ORDER BY ts", (T0,))
+        .fetchall()
+    )
+    assert [r[1] for r in rows] == [
+        1,
+        9,
+        9,
+        3,
+    ]  # 01-01 y 01-20 fuera del rango se conservan; 01-10 reemplazado
 
 
 # ---------------------------------------------------------------- fuentes (HTTP simulado)
+
 
 def _client(handler):
     return httpx.AsyncClient(transport=httpx.MockTransport(handler))
@@ -202,7 +251,9 @@ def test_yadio_and_bcv_sources():
     def handler(req: httpx.Request):
         if "yadio" in req.url.host:
             return httpx.Response(200, json={"rate": 938.9, "timestamp": 1788954013210})
-        return httpx.Response(200, json={"promedio": 832.49, "fechaActualizacion": "2026-09-11T00:00:00-04:00"})
+        return httpx.Response(
+            200, json={"promedio": 832.49, "fechaActualizacion": "2026-09-11T00:00:00-04:00"}
+        )
 
     y = asyncio.run(YadioSource().fetch(_client(handler)))
     b = asyncio.run(BCVSource().fetch(_client(handler)))
@@ -213,11 +264,17 @@ def test_yadio_and_bcv_sources():
 def test_import_replace_with_rejected_rows_422_and_writes_nothing(client):
     _import(client, "fecha,precio\n2020-01-01,1\n2020-01-02,2\n2020-01-03,3\n", source="bcv")
     # la fila rechazada (01-02) cae dentro del rango [01-01, 01-03] de las aceptadas
-    r = _import(client, "fecha,precio\n2020-01-01,7\n2020-01-02,abc\n2020-01-03,9\n", source="bcv", replace="true")
+    r = _import(
+        client, "fecha,precio\n2020-01-01,7\n2020-01-02,abc\n2020-01-03,9\n", source="bcv", replace="true"
+    )
     assert r.status_code == 422
     detail = r.json()["detail"]
     assert detail["rejected"] == 1 and detail["rejected_sample"][0]["row"] == 2
-    rows = dbmod.get_db()._conn.execute("SELECT price FROM ticks WHERE source='bcv' AND ts < ? ORDER BY ts", (T0,)).fetchall()
+    rows = (
+        dbmod.get_db()
+        ._conn.execute("SELECT price FROM ticks WHERE source='bcv' AND ts < ? ORDER BY ts", (T0,))
+        .fetchall()
+    )
     assert [r[0] for r in rows] == [1, 2, 3]
 
 
@@ -233,7 +290,9 @@ def test_history_csv_round_trip_with_replace(client, sep):
     db.insert_ticks([Tick("yadio", T0 + d * DAY + 3600, 36.512 + d) for d in range(5)])
     db.insert_ticks([Tick("yadio", T0 + 5 * DAY + 3600, 1234.125)])
     params = {"start": "2025-01-01", "end": "2025-01-06", "sources": "yadio", "sep": sep}
-    before = client.get("/api/v1/rates/history", params={k: v for k, v in params.items() if k != "sep"}).json()
+    before = client.get(
+        "/api/v1/rates/history", params={k: v for k, v in params.items() if k != "sep"}
+    ).json()
     exported = client.get("/api/v1/rates/history.csv", params=params)
     assert exported.status_code == 200
     r = _import(client, exported.content, source="yadio", replace="true")
@@ -280,6 +339,6 @@ def test_stream_first_event_has_latest_rates(client):
     chunk = asyncio.run(first_chunk())
     head, data = chunk.rstrip("\n").split("\n", 1)
     assert head == "event: rates"
-    payload = json.loads(data[len("data: "):])
+    payload = json.loads(data[len("data: ") :])
     assert [p["source"] for p in payload] == ["binance_p2p"]
     assert payload[0]["price"] == pytest.approx(109.20)

@@ -1,4 +1,5 @@
 """Formato de eventos SSE."""
+
 from app.sse import SSE_KEEPALIVE, sse_event
 
 

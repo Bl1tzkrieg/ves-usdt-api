@@ -1,9 +1,10 @@
 """Genera datos de demostración (2 años de ticks sintéticos) para probar la API sin esperar al recolector.
 
-    python -m scripts.seed_demo            # escribe en RATES_DB_PATH
-    python -m scripts.seed_demo --days 30
-    python -m scripts.seed_demo --force    # incluso si la BD ya tiene datos (rehúsa por defecto)
+python -m scripts.seed_demo            # escribe en RATES_DB_PATH
+python -m scripts.seed_demo --days 30
+python -m scripts.seed_demo --force    # incluso si la BD ya tiene datos (rehúsa por defecto)
 """
+
 from __future__ import annotations
 
 import argparse
@@ -43,11 +44,20 @@ def main() -> None:
         if int(t_days) != day:
             day = int(t_days)
             # BCV: un valor por día hábil
-            from datetime import datetime, timezone, timedelta
+            from datetime import datetime, timedelta, timezone
+
             d = datetime.fromtimestamp(ts, tz=timezone(timedelta(hours=-4)))
             if d.weekday() < 5:
-                ticks.append(Tick("bcv", int(d.replace(hour=0, minute=0, second=0).timestamp()), bcv * math.exp(0.0043 * t_days)))
-                ticks.append(Tick("paralelo", int(d.replace(hour=18, minute=0, second=0).timestamp()), price * 1.01))
+                ticks.append(
+                    Tick(
+                        "bcv",
+                        int(d.replace(hour=0, minute=0, second=0).timestamp()),
+                        bcv * math.exp(0.0043 * t_days),
+                    )
+                )
+                ticks.append(
+                    Tick("paralelo", int(d.replace(hour=18, minute=0, second=0).timestamp()), price * 1.01)
+                )
     n = get_db().insert_ticks(ticks)
     print(f"Insertados {n} ticks de demostración ({args.days} días)")
 

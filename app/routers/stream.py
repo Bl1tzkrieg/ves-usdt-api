@@ -1,4 +1,5 @@
 """Stream SSE con el último valor de cada fuente."""
+
 from __future__ import annotations
 
 import asyncio
@@ -33,5 +34,8 @@ async def stream(request: Request, sources: str | None = None, every: int = Quer
                 yield SSE_KEEPALIVE
             await asyncio.sleep(every)
 
-    return StreamingResponse(gen(), media_type="text/event-stream",
-                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )

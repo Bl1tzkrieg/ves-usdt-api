@@ -4,12 +4,14 @@ Intervalos soportados: raw, hour, day, week (lunes–domingo), month.
 Todo se recorta en la zona horaria local configurada (Venezuela, UTC-4), de modo que
 "un día" sea el día venezolano y no el día UTC.
 """
+
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
+from collections.abc import Iterable
+from dataclasses import asdict, dataclass
 from datetime import date, datetime, timedelta, timezone
 from enum import Enum
-from typing import Any, Iterable
+from typing import Any
 
 from .config import settings
 from .db import Tick
@@ -37,15 +39,15 @@ class CandleField(str, Enum):
 
 
 class Fill(str, Enum):
-    none = "none"       # solo cubetas con datos
+    none = "none"  # solo cubetas con datos
     forward = "forward"  # repetir último valor conocido en cubetas vacías (útil para BCV en fines de semana)
-    null = "null"        # emitir la cubeta con valores null
+    null = "null"  # emitir la cubeta con valores null
 
 
 @dataclass(slots=True)
 class Candle:
-    t: int          # inicio de la cubeta, epoch UTC (segundos)
-    date: str       # inicio de la cubeta en hora local, ISO 8601
+    t: int  # inicio de la cubeta, epoch UTC (segundos)
+    date: str  # inicio de la cubeta en hora local, ISO 8601
     open: float | None
     high: float | None
     low: float | None
@@ -59,6 +61,7 @@ class Candle:
 
 
 # ------------------------------------------------------------------ utilidades de tiempo
+
 
 def to_local(ts: int) -> datetime:
     return datetime.fromtimestamp(ts, tz=LOCAL_TZ)
@@ -102,6 +105,7 @@ def period_start(d: date, interval: Interval) -> date:
 
 
 # ------------------------------------------------------------------ agregación
+
 
 def _candle_from_row(row: dict[str, Any]) -> Candle:
     return Candle(
@@ -158,7 +162,11 @@ def rollup(daily: list[Candle], interval: Interval) -> list[Candle]:
 
 
 def fill_gaps(
-    candles: list[Candle], interval: Interval, start_ts: int, end_ts: int, mode: Fill,
+    candles: list[Candle],
+    interval: Interval,
+    start_ts: int,
+    end_ts: int,
+    mode: Fill,
     seed: float | None = None,
 ) -> list[Candle]:
     """Rellena cubetas vacías entre start y end (hora local) según `mode`.
@@ -200,9 +208,23 @@ def _emit(out: list[Candle], found: Candle | None, t: int, last: Candle | None, 
         out.append(found)
     elif mode is Fill.forward and last is not None:
         v = last.close
-        out.append(Candle(t=t, date=local_iso(t), open=v, high=v, low=v, close=v, avg=v, count=0, filled=True))
+        out.append(
+            Candle(t=t, date=local_iso(t), open=v, high=v, low=v, close=v, avg=v, count=0, filled=True)
+        )
     elif mode is Fill.null:
-        out.append(Candle(t=t, date=local_iso(t), open=None, high=None, low=None, close=None, avg=None, count=0, filled=True))
+        out.append(
+            Candle(
+                t=t,
+                date=local_iso(t),
+                open=None,
+                high=None,
+                low=None,
+                close=None,
+                avg=None,
+                count=0,
+                filled=True,
+            )
+        )
     # Fill.forward sin ningún valor previo conocido: no hay nada que repetir, se omite la cubeta.
 
 

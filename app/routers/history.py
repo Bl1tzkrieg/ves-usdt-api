@@ -1,4 +1,5 @@
 """Endpoints de lectura: fuentes, último valor e histórico (JSON/CSV)."""
+
 from __future__ import annotations
 
 import asyncio
@@ -10,7 +11,7 @@ from fastapi.responses import StreamingResponse
 from .. import aggregation as agg
 from ..aggregation import CandleField
 from ..config import settings
-from ..csv_export import csv_chunks, csv_rows, export_filename
+from ..csv_export import Layout, csv_chunks, csv_rows, export_filename
 from ..db import get_db
 from ..models import HistoryResponse, LatestPoint, SourceInfo
 from ..series import build_series, tick_to_point
@@ -48,9 +49,12 @@ async def latest(sources: str | None = Query(None, description="Lista separada p
     return [LatestPoint(source=t.source, **tick_to_point(t)) for t in ticks]
 
 
-async def _load_series(q: HistoryQuery, names: list[str], ts_from: int, ts_to: int) -> dict[str, list[dict[str, Any]]]:
+async def _load_series(
+    q: HistoryQuery, names: list[str], ts_from: int, ts_to: int
+) -> dict[str, list[dict[str, Any]]]:
     return {
-        n: await asyncio.to_thread(build_series, n, ts_from, ts_to, q.interval, q.fill, q.max_points) for n in names
+        n: await asyncio.to_thread(build_series, n, ts_from, ts_to, q.interval, q.fill, q.max_points)
+        for n in names
     }
 
 
@@ -79,10 +83,22 @@ async def history(q: Annotated[HistoryQuery, Query()]):
 @router.get("/history.csv", summary="Mismo histórico, como CSV descargable (streaming, sin límite de filas)")
 async def history_csv(
     q: Annotated[HistoryQuery, Query()],
-    value: CandleField = Query(CandleField.close, description="Solo layout=wide: qué valor de la vela usar por columna"),
-    layout: str = Query("long", pattern="^(long|wide)$", description="long: una fila por fuente y fecha con OHLC. wide: una columna por fuente."),
-    sep: str = Query(",", min_length=1, max_length=1, description="Separador de columnas (use ';' para Excel en español)"),
-    decimal: str | None = Query(None, min_length=1, max_length=1, description="Separador decimal. Por defecto ',' si sep es ';', si no '.'"),
+    value: CandleField = Query(
+        CandleField.close, description="Solo layout=wide: qué valor de la vela usar por columna"
+    ),
+    layout: Layout = Query(
+        "long",
+        description="long: una fila por fuente y fecha con OHLC. wide: una columna por fuente.",
+    ),
+    sep: str = Query(
+        ",", min_length=1, max_length=1, description="Separador de columnas (use ';' para Excel en español)"
+    ),
+    decimal: str | None = Query(
+        None,
+        min_length=1,
+        max_length=1,
+        description="Separador decimal. Por defecto ',' si sep es ';', si no '.'",
+    ),
     filename: str | None = None,
 ):
     dec = decimal or ("," if sep == ";" else ".")

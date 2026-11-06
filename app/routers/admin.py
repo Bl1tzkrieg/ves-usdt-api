@@ -1,4 +1,5 @@
 """Endpoints de administración: recolección manual, estado del recolector e importación CSV."""
+
 from __future__ import annotations
 
 import asyncio
@@ -30,8 +31,11 @@ IMPORT_REJECTED_SAMPLE = 10
 _READ_CHUNK = 1 << 20  # 1 MiB
 
 
-@router.post("/collect", summary="Forzar una recolección inmediata de todas las fuentes",
-             dependencies=[Depends(require_api_key)])
+@router.post(
+    "/collect",
+    summary="Forzar una recolección inmediata de todas las fuentes",
+    dependencies=[Depends(require_api_key)],
+)
 async def collect_now():
     before = collector.last_run
     try:
@@ -39,9 +43,11 @@ async def collect_now():
     except CollectInProgress as e:
         raise HTTPException(409, str(e)) from e
     skipped = not ticks and collector.last_run == before  # corrida omitida por la separación mínima
-    return {"skipped": skipped,
-            "collected": [{"source": t.source, "price": t.price, "date": agg.local_iso(t.ts)} for t in ticks],
-            "status": collector.last_status}
+    return {
+        "skipped": skipped,
+        "collected": [{"source": t.source, "price": t.price, "date": agg.local_iso(t.ts)} for t in ticks],
+        "status": collector.last_status,
+    }
 
 
 @router.get("/collector", summary="Estado del recolector")
@@ -49,18 +55,25 @@ async def collector_status():
     return collector.status()
 
 
-@router.post("/import", response_model=ImportResult, summary="Importar histórico desde CSV",
-             dependencies=[Depends(require_api_key)])
+@router.post(
+    "/import",
+    response_model=ImportResult,
+    summary="Importar histórico desde CSV",
+    dependencies=[Depends(require_api_key)],
+)
 async def import_csv(
     file: UploadFile,
     source: str | None = Query(None, description="Fuente destino si el CSV no trae columna `source`"),
-    replace: bool = Query(False, description="Borrar antes los ticks de la(s) fuente(s) en el rango importado"),
+    replace: bool = Query(
+        False, description="Borrar antes los ticks de la(s) fuente(s) en el rango importado"
+    ),
 ):
     """CSV con cabecera. Columnas aceptadas (insensible a mayúsculas):
     - `date` (YYYY-MM-DD, ISO 8601, DD/MM/YYYY) **o** `timestamp` (epoch en s o ms)
     - `price` (o `close`, `rate`, `promedio`); acepta `1.234,56` y `1,5`. Para valores ambiguos
       (`1.234`, `36,512`) el delimitador decide el separador decimal: con `;` el decimal es `,`
-      y con `,` o tabulador es `.` (igual que escribe `history.csv`), así que su propia exportación se reimporta.
+      y con `,` o tabulador es `.` (igual que escribe `history.csv`), así que su propia
+      exportación se reimporta.
     - `source` (opcional si se pasa `?source=`)
     - `buy`, `sell` (opcionales → se guardan en `extra`)
 
@@ -75,7 +88,9 @@ async def import_csv(
         raise HTTPException(422, "CSV vacío o sin cabecera")
     headers = {c.lower().strip() for c in reader.fieldnames if c}
     if not headers & set(TS_KEYS) or not headers & set(PRICE_KEYS):
-        raise HTTPException(422, f"Faltan columnas: se requiere (date|timestamp) y price. Cabecera: {reader.fieldnames}")
+        raise HTTPException(
+            422, f"Faltan columnas: se requiere (date|timestamp) y price. Cabecera: {reader.fieldnames}"
+        )
     if not headers & set(SOURCE_KEYS) and not source:
         raise HTTPException(422, "Indique `?source=` o incluya una columna `source`")
     if source and source not in REGISTRY:
@@ -83,18 +98,26 @@ async def import_csv(
 
     try:
         parsed = rows_to_ticks(
-            reader, default_source=source, allowed_sources=REGISTRY, decimal_hint=decimal_hint_for(dialect.delimiter)
+            reader,
+            default_source=source,
+            allowed_sources=REGISTRY,
+            decimal_hint=decimal_hint_for(dialect.delimiter),
         )
     except csv.Error as e:
         raise HTTPException(422, f"CSV mal formado: {e}") from e
 
     if replace and parsed.rejected:
         # Una fila rechazada puede caer dentro del rango a reemplazar y se borraría sin sustituto.
-        raise HTTPException(422, {
-            "message": "Con `replace=true` no se admiten filas rechazadas; corrija el CSV. No se escribió nada.",
-            "rejected": len(parsed.rejected),
-            "rejected_sample": parsed.rejected[:IMPORT_REJECTED_SAMPLE],
-        })
+        raise HTTPException(
+            422,
+            {
+                "message": (
+                    "Con `replace=true` no se admiten filas rechazadas; corrija el CSV. No se escribió nada."
+                ),
+                "rejected": len(parsed.rejected),
+                "rejected_sample": parsed.rejected[:IMPORT_REJECTED_SAMPLE],
+            },
+        )
 
     db = get_db()
     write = db.replace_ticks if replace else db.insert_ticks

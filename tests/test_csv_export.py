@@ -1,4 +1,5 @@
 """Exportación CSV: formato numérico, filas wide alineadas y emisión por bloques."""
+
 from app.aggregation import CandleField, Interval
 from app.csv_export import csv_chunks, export_filename, format_number, wide_rows
 
@@ -7,8 +8,17 @@ T0 = 1_735_704_000  # 2025-01-01 00:00 -04:00
 
 
 def candle(t: int, close: float) -> dict:
-    return {"t": t, "date": "", "open": close, "high": close, "low": close, "close": close,
-            "avg": close, "count": 1, "filled": False}
+    return {
+        "t": t,
+        "date": "",
+        "open": close,
+        "high": close,
+        "low": close,
+        "close": close,
+        "avg": close,
+        "count": 1,
+        "filled": False,
+    }
 
 
 def test_format_number():

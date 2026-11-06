@@ -3,6 +3,7 @@
 El histórico se construye con lo que el recolector acumula (más lo que se importe por CSV),
 así que no depende de que ninguna API externa ofrezca histórico ni imponga límites de rango.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -25,7 +26,6 @@ class CollectInProgress(RuntimeError):
 class Collector:
     # Separación mínima entre recolecciones (anti-amplificación hacia las APIs externas)
     min_gap_seconds = 30
-
 
     def __init__(self, sources: list[str] | None = None, interval: int | None = None) -> None:
         names = sources or settings.collector_sources
@@ -54,7 +54,7 @@ class Collector:
         async with httpx.AsyncClient(timeout=settings.http_timeout_seconds) as client:
             results = await asyncio.gather(*(s.fetch(client) for s in self.sources), return_exceptions=True)
         ticks: list[Tick] = []
-        for src, res in zip(self.sources, results):
+        for src, res in zip(self.sources, results, strict=True):
             if isinstance(res, BaseException):
                 self.last_status[src.name] = f"error: {res}"
                 log.warning("Fuente %s falló: %s", src.name, res)
@@ -77,7 +77,7 @@ class Collector:
                 log.exception("Error inesperado en el recolector")
             try:
                 await asyncio.wait_for(self._stop.wait(), timeout=self.interval)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass
 
     def start(self) -> None:

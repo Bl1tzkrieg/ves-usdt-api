@@ -1,4 +1,5 @@
 """Seguridad: API key en endpoints de escritura, cabeceras y guarda de concurrencia del recolector."""
+
 from __future__ import annotations
 
 import asyncio
@@ -8,7 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import db as dbmod
-from app.collector import Collector, CollectInProgress
+from app.collector import CollectInProgress, Collector
 from app.db import Database, Tick
 from app.main import app
 from app.sources.base import RateSource
@@ -27,7 +28,9 @@ def client(monkeypatch):
 
 
 def _import(client, **kw):
-    return client.post("/api/v1/rates/import", params={"source": "bcv"}, files={"file": ("h.csv", CSV, "text/csv")}, **kw)
+    return client.post(
+        "/api/v1/rates/import", params={"source": "bcv"}, files={"file": ("h.csv", CSV, "text/csv")}, **kw
+    )
 
 
 def test_import_requires_key(client):
@@ -122,7 +125,9 @@ def test_concurrent_collect_raises_in_progress(monkeypatch):
         dbmod.set_db(None)
 
 
-@pytest.mark.parametrize("path", ["/api/v1/rates/latest", "/api/v1/rates/sources", "/api/v1/rates/collector", "/"])
+@pytest.mark.parametrize(
+    "path", ["/api/v1/rates/latest", "/api/v1/rates/sources", "/api/v1/rates/collector", "/"]
+)
 def test_read_paths_open_without_key(client, path):
     assert TestClient(app).get(path).status_code == 200
 
@@ -162,8 +167,12 @@ def multipart_spy(monkeypatch):
 
 
 def _raw_post(client, headers, content=b"x"):
-    return client.post(IMPORT, params={"source": "bcv"}, content=content,
-                       headers={"Content-Type": "multipart/form-data; boundary=b", **headers})
+    return client.post(
+        IMPORT,
+        params={"source": "bcv"},
+        content=content,
+        headers={"Content-Type": "multipart/form-data; boundary=b", **headers},
+    )
 
 
 def test_import_guard_401_without_key_before_body(client, multipart_spy):
@@ -228,7 +237,12 @@ def test_import_guard_asgi_never_reads_body(monkeypatch):
     assert asyncio.run(run([(b"x-api-key", b"k"), (b"content-length", b"abc")])) == 400
     assert asyncio.run(run([(b"x-api-key", b"k"), (b"content-length", HUGE.encode())])) == 413
     assert asyncio.run(run([(b"x-api-key", b"k")])) == 411
-    assert asyncio.run(run([(b"x-api-key", b"k"), (b"transfer-encoding", b"chunked"), (b"content-length", b"10")])) == 411
+    assert (
+        asyncio.run(
+            run([(b"x-api-key", b"k"), (b"transfer-encoding", b"chunked"), (b"content-length", b"10")])
+        )
+        == 411
+    )
     assert asyncio.run(run([(b"transfer-encoding", b"chunked")])) == 401
     assert asyncio.run(run([(b"content-length", b"10")])) == 401
 

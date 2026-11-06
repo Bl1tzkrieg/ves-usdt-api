@@ -1,4 +1,5 @@
 """rollup (promedio ponderado), downsample y parse_instant."""
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone

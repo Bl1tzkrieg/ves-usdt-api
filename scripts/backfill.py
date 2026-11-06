@@ -23,14 +23,16 @@ El script detecta solo la forma de los datos: lista de listas [ts, precio], list
 con la lista dentro (--list-key). Fechas: epoch en s o ms, ISO 8601, YYYY-MM-DD o DD-MM-YYYY.
 Si no logra interpretar algo, imprime una muestra de la respuesta para ajustar las claves.
 """
+
 from __future__ import annotations
 
 import argparse
 import csv
 import json
 import sys
-from datetime import date, datetime, timedelta, timezone
-from typing import Any, Iterable
+from collections.abc import Iterable
+from datetime import date, datetime, timedelta
+from typing import Any
 
 import httpx
 
@@ -40,14 +42,22 @@ from app.sources import REGISTRY
 from app.tick_parsing import decimal_hint_for, find_list, rows_to_ticks, sniff_dialect
 
 
-
 def to_ticks(
-    items: Iterable[Any], source: str, ts_key: str | None, price_key: str | None, decimal_hint: str | None = None
+    items: Iterable[Any],
+    source: str,
+    ts_key: str | None,
+    price_key: str | None,
+    decimal_hint: str | None = None,
 ) -> tuple[list[Tick], list[Any]]:
     """Convierte puntos a ticks; devuelve también los puntos originales que no se pudieron interpretar."""
     items = list(items)
     parsed = rows_to_ticks(
-        items, default_source=source, ts_key=ts_key, price_key=price_key, allowed_sources={source}, decimal_hint=decimal_hint
+        items,
+        default_source=source,
+        ts_key=ts_key,
+        price_key=price_key,
+        allowed_sources={source},
+        decimal_hint=decimal_hint,
     )
     return parsed.ticks, [items[r["row"] - 1] for r in parsed.rejected]
 
@@ -57,7 +67,10 @@ def save(ticks: list[Tick], source: str, dry: bool) -> None:
         print("Nada que importar.")
         return
     ticks.sort(key=lambda t: t.ts)
-    first, last = datetime.fromtimestamp(ticks[0].ts, LOCAL_TZ), datetime.fromtimestamp(ticks[-1].ts, LOCAL_TZ)
+    first, last = (
+        datetime.fromtimestamp(ticks[0].ts, LOCAL_TZ),
+        datetime.fromtimestamp(ticks[-1].ts, LOCAL_TZ),
+    )
     print(f"{len(ticks)} puntos para '{source}' entre {first:%Y-%m-%d} y {last:%Y-%m-%d}")
     if dry:
         print("(--dry-run: no se escribió nada)")
@@ -82,6 +95,7 @@ def fetch_json(url: str, headers: list[str]) -> Any:
 
 
 # ---------------------------------------------------------------- modos
+
 
 def cmd_peek(a: argparse.Namespace) -> None:
     data = fetch_json(a.url, a.header)
@@ -142,11 +156,17 @@ def cmd_pydolarve(a: argparse.Namespace) -> None:
     cur = start
     while cur < end:
         nxt = min(cur + timedelta(days=a.chunk_days), end)
-        url = (f"{a.base}/api/v2/dollar/history?page={a.page}&monitor={a.monitor}"
-               f"&start_date={cur:%d-%m-%Y}&end_date={nxt:%d-%m-%Y}&format_date=iso&rounded_price=false")
+        url = (
+            f"{a.base}/api/v2/dollar/history?page={a.page}&monitor={a.monitor}"
+            f"&start_date={cur:%d-%m-%Y}&end_date={nxt:%d-%m-%Y}&format_date=iso&rounded_price=false"
+        )
         try:
             data = fetch_json(url, headers)
-            items = find_list(data, "history") if isinstance(data, dict) and "history" in data else find_list(data, None)
+            items = (
+                find_list(data, "history")
+                if isinstance(data, dict) and "history" in data
+                else find_list(data, None)
+            )
             ticks, bad = to_ticks(items, a.source, None, None)
             print(f"  {cur} → {nxt}: {len(ticks)} puntos" + (f", {len(bad)} sin interpretar" if bad else ""))
             all_ticks.extend(ticks)

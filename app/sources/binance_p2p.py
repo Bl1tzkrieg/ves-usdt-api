@@ -3,6 +3,7 @@
 Se consultan los primeros N anuncios de compra y de venta y se toma la mediana de cada lado;
 el precio del tick es el punto medio. `extra` guarda compra, venta y cuántos anuncios se usaron.
 """
+
 from __future__ import annotations
 
 import statistics
