@@ -73,7 +73,7 @@ const primarySource = () => state.sources.find((s) => USDT_SOURCES.includes(s)) 
 function rangeParams() {
   const p = new URLSearchParams();
   const start = $('start').value, end = $('end').value;
-  if (start) p.set('start', start); else p.set('days', state.days > 0 ? state.days : ALL_TIME_DAYS);
+  if (start) p.set('start', start); else p.set('days', mainDays());
   if (end) p.set('end', end);
   return p;
 }
@@ -90,21 +90,28 @@ function params(extra = {}) {
 
 const presetDays = () => (state.days > 0 ? state.days : ALL_TIME_DAYS);
 
+// En intervalo Hora con relleno el servidor limita los cubos a 100000: el preset se recorta a ~11 años
+const MAX_FILL_BUCKETS = 100000;
+const HOUR_FILL_MAX_DAYS = Math.floor(MAX_FILL_BUCKETS / 24);
+const hourCapped = () => $('interval').value === 'hour' && $('fill').value !== 'none' && presetDays() > HOUR_FILL_MAX_DAYS;
+const mainDays = () => (hourCapped() ? HOUR_FILL_MAX_DAYS : presetDays());
+const rangeNote = () => (!$('start').value && hourCapped() ? 'rango limitado a ~11 años en intervalo Hora' : '');
+
 // Primer día del rango que ve la gráfica principal ("YYYY-MM-DD"), o null si es "últimos N días" desde ahora.
 // Con solo "Hasta", el servidor cuenta `days` hacia atrás desde `end`.
 function rangeStartDate() {
   const start = $('start').value, end = $('end').value;
   if (start) return start;
   if (!end) return null;
-  return new Date(calendarDate(end).getTime() - presetDays() * DAY_MS).toISOString().slice(0, 10);
+  return new Date(calendarDate(end).getTime() - mainDays() * DAY_MS).toISOString().slice(0, 10);
 }
 
 // `/daily-change` solo acepta `days` hacia atrás desde ahora: se pide una ventana que cubra
-// [inicio del rango, ahora] y luego se recorta con `withinRange`
+// [inicio del rango, ahora] y luego se recorta con `withinRange`. Se pide un día de más para que
+// la primera barra (que necesita el cierre del día anterior) caiga en el mismo día que la gráfica principal
 function dailyChangeDays() {
   const from = rangeStartDate();
-  if (!from) return presetDays();
-  const days = Math.ceil((Date.now() - calendarDate(from).getTime()) / DAY_MS) + 1;
+  const days = from ? Math.ceil((Date.now() - calendarDate(from).getTime()) / DAY_MS) + 1 : mainDays() + 1;
   return Math.min(Math.max(days, 1), ALL_TIME_DAYS);
 }
 
@@ -275,6 +282,7 @@ function setLoading(on) {
 let lastData, lastDaily = [], lastSpread = [];
 let dailyError = null, spreadError = null;
 let loadSeq = 0;
+let loadFailure = ''; // mensaje del último fallo de /history principal; vacío si fue bien
 
 async function load() {
   const seq = ++loadSeq; // invalida cualquier respuesta en vuelo
@@ -286,6 +294,7 @@ async function load() {
     charts.main.update();
     setMessage('main-empty', 'Marca al menos una fuente');
     $('panel-main').classList.add('is-empty');
+    loadFailure = '';
     setStatus('');
     return;
   }
@@ -304,11 +313,13 @@ async function load() {
   if (seq !== loadSeq) return; // llegó una consulta más nueva mientras tanto
   setLoading(false);
   if (main.status === 'rejected') {
-    setStatus(main.reason.message);
+    loadFailure = main.reason.message;
+    setStatus(loadFailure);
     setMessage('main-empty', loadError(main.reason));
     return; // la gráfica conserva lo último que mostró
   }
   lastData = main.value;
+  loadFailure = '';
   // Un fallo no es "sin datos": se guarda el error para que el panel lo diga
   dailyError = daily.status === 'rejected' ? daily.reason : null;
   spreadError = spread.status === 'rejected' ? spread.reason : null;
@@ -366,7 +377,7 @@ function render() {
   renderSpread(longSpan);
 
   const n = data.series.reduce((a, s) => a + s.points.length, 0);
-  setStatus(`${fmtInt.format(n)} puntos del ${data.start.slice(0, 10)} al ${data.end.slice(0, 10)} (${data.timezone})`, true);
+  setStatus(`${fmtInt.format(n)} puntos del ${data.start.slice(0, 10)} al ${data.end.slice(0, 10)} (${data.timezone})${rangeNote() ? ` · ${rangeNote()}` : ''}`, true);
   renderTables(labels);
 }
 
@@ -574,6 +585,8 @@ async function enablePendingExports() {
 function onExport(button, urlFn) {
   button.addEventListener('click', () => {
     if (button.getAttribute('aria-disabled') === 'true') return;
+    if (!state.sources.length) { setStatus('Marca al menos una fuente'); return; }
+    if (loadFailure) { setStatus(loadFailure); return; }
     location.href = urlFn();
   });
 }
