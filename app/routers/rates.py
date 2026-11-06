@@ -5,8 +5,7 @@ import asyncio
 import csv
 import io
 import json
-import re
-from typing import AsyncIterator, Iterator
+from typing import AsyncIterator
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile
 from fastapi.responses import StreamingResponse
@@ -15,6 +14,7 @@ from .. import aggregation as agg
 from ..aggregation import CandleField, Fill, Interval
 from ..collector import CollectInProgress, collector
 from ..config import settings
+from ..csv_export import csv_chunks, csv_rows, export_filename
 from ..db import get_db
 from ..security import require_api_key
 from ..models import HistoryResponse, ImportResult, LatestPoint, SourceInfo
@@ -122,56 +122,10 @@ async def history_csv(
     data = {
         n: await asyncio.to_thread(build_series, n, ts_from, ts_to, interval, fill, max_points) for n in names
     }
-
-    def _date(iso: str) -> str:
-        return iso if interval in (Interval.hour, Interval.raw) else iso[:10]
-
-    def _num(v: float | None) -> str:
-        if v is None:
-            return ""
-        txt = f"{v:.6f}".rstrip("0").rstrip(".")
-        return txt.replace(".", dec) if dec != "." else txt
-
-    def records() -> Iterator[list]:
-        if interval is Interval.raw:
-            yield ["source", "date", "timestamp", "price", "buy", "sell"]
-            for n, pts in data.items():
-                for p in pts:
-                    ex = p.get("extra") or {}
-                    yield [n, p["date"], p["t"], _num(p["price"]), _num(ex.get("buy")), _num(ex.get("sell"))]
-        elif layout == "long":
-            yield ["source", "date", "timestamp", "open", "high", "low", "close", "avg", "count", "filled"]
-            for n, pts in data.items():
-                for c in pts:
-                    yield [n, _date(c["date"]), c["t"], _num(c["open"]), _num(c["high"]), _num(c["low"]),
-                           _num(c["close"]), _num(c["avg"]), c["count"], int(c["filled"])]
-        else:  # wide: una columna por fuente, alineadas por inicio de cubeta
-            all_t = sorted({c["t"] for pts in data.values() for c in pts})
-            by = {n: {c["t"]: c for c in pts} for n, pts in data.items()}
-            yield ["date", "timestamp", *names]
-            for t in all_t:
-                yield [_date(agg.local_iso(t)), t, *[_num(by[n][t][value.value]) if t in by[n] else "" for n in names]]
-
-    def rows(chunk: int = 2000) -> Iterator[str]:
-        """Emite el CSV en bloques de `chunk` filas: memoria constante, sin límite de filas."""
-        buf = io.StringIO()
-        w = csv.writer(buf, delimiter=sep, lineterminator="\n")
-        pending = 0
-        for rec in records():
-            w.writerow(rec)
-            pending += 1
-            if pending >= chunk:
-                yield buf.getvalue()
-                buf.seek(0)
-                buf.truncate()
-                pending = 0
-        if pending:
-            yield buf.getvalue()
-
-    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", filename or "")[:120]
-    name = safe if re.search(r"[A-Za-z0-9]", safe) else f"ves_rates_{interval.value}_{agg.to_local(ts_from).date()}_{agg.to_local(ts_to - 1).date()}.csv"
+    rows = csv_rows(data, interval, layout, value, dec)
+    name = export_filename(filename, interval, ts_from, ts_to)
     return StreamingResponse(
-        rows(),
+        csv_chunks(rows, sep),
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{name}"'},
     )

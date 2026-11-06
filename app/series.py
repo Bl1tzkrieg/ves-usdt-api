@@ -1,6 +1,7 @@
 """Construcción de series de precios: interpretación de fechas/rangos y armado de velas o puntos raw."""
 from __future__ import annotations
 
+import time
 from datetime import date, datetime, timedelta
 from typing import Any
 
@@ -57,7 +58,7 @@ def _parse_instant_unchecked(raw: str, *, inclusive_day_end: bool) -> int:
 
 def resolve_range(start: str | None, end: str | None, days: int | None) -> tuple[int, int]:
     """Rango [inicio, fin) en epoch; por defecto termina ahora y abarca `days` (o 30) días."""
-    ts_end = parse_instant(end, inclusive_day_end=True) or int(datetime.now().timestamp())
+    ts_end = parse_instant(end, inclusive_day_end=True) or int(time.time())
     ts_start = parse_instant(start, inclusive_day_end=False)
     if ts_start is None:
         ts_start = ts_end - (days or DEFAULT_RANGE_DAYS) * SECONDS_PER_DAY
