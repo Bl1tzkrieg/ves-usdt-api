@@ -313,9 +313,6 @@ async def import_csv(
         ticks.append(Tick(source=src, ts=ts, price=float(raw_price), extra=extra or None))
 
     db = get_db()
-    if replace and ticks:
-        for src in {t.source for t in ticks}:
-            sub = [t.ts for t in ticks if t.source == src]
-            await asyncio.to_thread(db.delete_range, src, min(sub), max(sub) + 1)
-    inserted = await asyncio.to_thread(db.insert_ticks, ticks)
+    write = db.replace_ticks if replace else db.insert_ticks
+    inserted = await asyncio.to_thread(write, ticks)
     return ImportResult(received=len(ticks), inserted=inserted, ignored=len(ticks) - inserted)

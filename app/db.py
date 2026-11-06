@@ -7,6 +7,7 @@ sin límite de días: el costo es proporcional a la cantidad de ticks en el rang
 from __future__ import annotations
 
 import json
+import math
 import os
 import sqlite3
 import threading
@@ -28,12 +29,21 @@ CREATE INDEX IF NOT EXISTS ix_ticks_source_ts ON ticks (source, ts);
 """
 
 
+MAX_TS = 4_102_444_800  # 2100-01-01 UTC: cota superior razonable para un epoch en segundos
+
+
 @dataclass(slots=True)
 class Tick:
     source: str
     ts: int
     price: float
     extra: dict[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        if not 0 < self.ts < MAX_TS:
+            raise ValueError(f"Timestamp fuera de rango (0, {MAX_TS}): {self.ts!r}")
+        if not (math.isfinite(self.price) and self.price > 0):
+            raise ValueError(f"Precio inválido (debe ser finito y mayor que 0): {self.price!r}")
 
 
 class Database:
@@ -69,6 +79,28 @@ class Database:
         with self._lock, self._conn:
             cur = self._conn.execute(
                 "DELETE FROM ticks WHERE source = ? AND ts >= ? AND ts < ?", (source, ts_from, ts_to)
+            )
+            return cur.rowcount
+
+    def replace_ticks(self, ticks: Sequence[Tick]) -> int:
+        """Borra el rango [min ts, max ts] de cada fuente e inserta `ticks`, todo en una transacción."""
+        rows = [
+            (t.source, int(t.ts), float(t.price), json.dumps(t.extra) if t.extra else None)
+            for t in ticks
+        ]
+        if not rows:
+            return 0
+        bounds: dict[str, tuple[int, int]] = {}
+        for source, ts, _, _ in rows:
+            lo, hi = bounds.get(source, (ts, ts))
+            bounds[source] = (min(lo, ts), max(hi, ts))
+        with self._lock, self._conn:
+            for source, (lo, hi) in bounds.items():
+                self._conn.execute(
+                    "DELETE FROM ticks WHERE source = ? AND ts >= ? AND ts <= ?", (source, lo, hi)
+                )
+            cur = self._conn.executemany(
+                "INSERT OR IGNORE INTO ticks (source, ts, price, extra) VALUES (?, ?, ?, ?)", rows
             )
             return cur.rowcount
 
