@@ -30,6 +30,9 @@ JAN1 = 1_577_851_200
         (float("nan"), None),
         ("13/01/2020", JAN1 + 12 * 86400),  # DD/MM
         ("01/13/2020", None),  # MM/DD no se adivina
+        ("20200101", JAN1),  # fecha compacta YYYYMMDD, no epoch
+        (" 20200101 ", JAN1),
+        ("20201301", None),
     ],
 )
 def test_parse_ts(value, expected):
@@ -193,3 +196,23 @@ def test_rows_to_ticks_decimal_hint_applies_to_price_and_extra():
     )
     assert res.rejected == []
     assert (res.ticks[0].price, res.ticks[0].extra) == (36.512, {"buy": 1234.0})
+
+
+@pytest.mark.parametrize("raw", ["43831", 43831, "43831.5", 946_684_799, "0"])
+def test_rows_to_ticks_rejects_implausible_numeric_timestamps(raw):
+    # serial de Excel (43831 = 2020-01-01) o epoch anterior a 2000-01-01 UTC
+    res = rows_to_ticks([{"timestamp": raw, "price": "5"}], default_source="bcv", allowed_sources={"bcv"})
+    assert res.ticks == []
+    assert "timestamp fuera de rango plausible" in res.rejected[0]["reason"]
+    pair = rows_to_ticks([[raw, 5]], default_source="bcv", allowed_sources={"bcv"})
+    assert "timestamp fuera de rango plausible" in pair.rejected[0]["reason"]
+
+
+def test_rows_to_ticks_compact_date_and_min_plausible_epoch_accepted():
+    res = rows_to_ticks(
+        [{"date": "20200101", "price": "5"}, {"timestamp": 946_684_800, "price": "6"}],
+        default_source="bcv",
+        allowed_sources={"bcv"},
+    )
+    assert res.rejected == []
+    assert [t.ts for t in res.ticks] == [JAN1, 946_684_800]

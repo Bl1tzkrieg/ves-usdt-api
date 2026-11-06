@@ -21,6 +21,9 @@ EXTRA_KEYS = ("buy", "sell")
 # Solo formatos DD/MM: MM/DD/YYYY es ambiguo y debe pedirse con `fmt=`.
 _DAY_FIRST_FORMATS = ("%d-%m-%Y", "%d/%m/%Y", "%d-%m-%Y, %I:%M %p", "%d/%m/%Y, %I:%M %p")
 _MS_THRESHOLD = 1e11
+# Epoch numérico mínimo aceptado en filas importadas (2000-01-01 UTC): por debajo suele ser un
+# serial de Excel o una fecha compacta mal leída, no un instante real.
+MIN_PLAUSIBLE_TS = 946_684_800
 
 
 @dataclass
@@ -30,7 +33,7 @@ class ParseResult:
 
 
 def parse_ts(value: Any, *, fmt: str | None = None) -> int | None:
-    """Epoch (s o ms), ISO 8601, `YYYY-MM-DD`, `DD-MM-YYYY` o `DD/MM/YYYY` → epoch en segundos.
+    """Epoch (s o ms), ISO 8601, `YYYY-MM-DD`, `YYYYMMDD`, `DD-MM-YYYY` o `DD/MM/YYYY` → epoch en segundos.
 
     Sin zona horaria se asume la local. Con `fmt` solo se usa ese formato `strptime`.
     """
@@ -44,7 +47,12 @@ def parse_ts(value: Any, *, fmt: str | None = None) -> int | None:
     text = str(value).strip()
     if not text:
         return None
-    if text.replace(".", "", 1).isdigit():
+    if len(text) == 8 and text.isascii() and text.isdigit():
+        try:
+            return int(datetime.strptime(text, "%Y%m%d").replace(tzinfo=LOCAL_TZ).timestamp())
+        except ValueError:
+            return None
+    if _is_numeric_text(text):
         return parse_ts(float(text))
     if fmt:
         try:
@@ -63,6 +71,21 @@ def parse_ts(value: Any, *, fmt: str | None = None) -> int | None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=LOCAL_TZ)
     return int(parsed.timestamp())
+
+
+def _is_numeric_text(text: str) -> bool:
+    return text.replace(".", "", 1).isdigit()
+
+
+def _parse_row_ts(value: Any) -> int | None:
+    """`parse_ts` para filas importadas: un epoch numérico anterior a 2000 lanza ValueError."""
+    ts = parse_ts(value)
+    if ts is None or ts >= MIN_PLAUSIBLE_TS:
+        return ts
+    text = str(value).strip()
+    if isinstance(value, (int, float)) or (_is_numeric_text(text) and len(text) != 8):
+        raise ValueError(f"timestamp fuera de rango plausible: {value!r}")
+    return ts
 
 
 _CURRENCY_PREFIX = re.compile(r"(?i)^\s*(bs\.?\s*[sd]?\.?|ves)\s*")
@@ -184,14 +207,14 @@ def _row_to_tick(
     source = default_source
     extra: dict[str, float] = {}
     if isinstance(item, (list, tuple)) and len(item) >= 2:
-        ts, price = parse_ts(item[0]), price_of(item[1])
+        ts, price = _parse_row_ts(item[0]), price_of(item[1])
         if ts is None:
             raise ValueError(f"fecha inválida o ausente: {item[0]!r}")
         if price is None:
             raise ValueError(f"precio inválido o ausente: {item[1]!r}")
     elif isinstance(item, Mapping):
         row = {k.lower().strip(): v for k, v in item.items() if isinstance(k, str)}
-        ts = _pick_parsed(row, ts_key, TS_KEYS, parse_ts, "fecha")
+        ts = _pick_parsed(row, ts_key, TS_KEYS, _parse_row_ts, "fecha")
         price = _pick_parsed(row, price_key, PRICE_KEYS, price_of, "precio")
         raw_source = next((row[k] for k in SOURCE_KEYS if row.get(k)), None)
         source = raw_source or default_source
