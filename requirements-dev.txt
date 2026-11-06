@@ -1,3 +1,4 @@
 pytest
 ruff==0.16.9
 playwright==1.63.0
+pypdf>=4  # solo para leer los PDF en las pruebas

@@ -7,6 +7,7 @@ COPY app ./app
 COPY static ./static
 COPY scripts ./scripts
 ENV RATES_DB_PATH=/data/rates.db
+ENV MPLCONFIGDIR=/tmp/matplotlib
 VOLUME ["/data"]
 USER app
 EXPOSE 8000

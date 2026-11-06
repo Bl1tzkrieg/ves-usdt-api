@@ -27,7 +27,7 @@ def resolve_sources_or_all(raw: str | None) -> list[str]:
 
 
 class HistoryQuery(BaseModel):
-    """Consulta de histórico compartida por `/history` y `/history.csv` (parámetros de query)."""
+    """Consulta de histórico compartida por `/history`, `/history.csv` y `/history.xlsx` (query)."""
 
     start: str | None = Field(
         None, description="Inicio: YYYY-MM-DD, ISO 8601 o epoch. Por defecto `end - days`."

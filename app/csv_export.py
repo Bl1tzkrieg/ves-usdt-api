@@ -61,17 +61,25 @@ def long_rows(data: Series, interval: Interval, decimal_sep: str) -> Iterator[li
             ]
 
 
+def align_by_t(data: Series, key: str) -> Iterator[tuple[int, list[Any]]]:
+    """(t, [valor de `key` por fuente, en el orden de `data`]) para cada `t` presente en alguna fuente.
+
+    Los `t` salen ordenados; `None` donde una fuente no tiene punto en ese `t`.
+    """
+    all_t = sorted({p["t"] for points in data.values() for p in points})
+    by_t = [{p["t"]: p[key] for p in points} for points in data.values()]
+    for t in all_t:
+        yield t, [values.get(t) for values in by_t]
+
+
 def wide_rows(data: Series, interval: Interval, field: CandleField, decimal_sep: str) -> Iterator[list]:
     """Una columna por fuente, alineadas por inicio de cubeta; celda vacía si falta la cubeta."""
-    names = list(data)
-    all_t = sorted({c["t"] for candles in data.values() for c in candles})
-    by_t = {n: {c["t"]: c for c in candles} for n, candles in data.items()}
-    yield ["date", "timestamp", *names]
-    for t in all_t:
+    yield ["date", "timestamp", *data]
+    for t, values in align_by_t(data, field.value):
         yield [
             _row_date(agg.local_iso(t), interval),
             t,
-            *(format_number(by_t[n][t][field.value], decimal_sep) if t in by_t[n] else "" for n in names),
+            *(format_number(v, decimal_sep) for v in values),
         ]
 
 
@@ -103,9 +111,15 @@ def csv_chunks(rows: Iterable[list], sep: str, chunk_rows: int = 2000) -> Iterat
         yield buf.getvalue()
 
 
-def export_filename(requested: str | None, interval: Interval, ts_from: int, ts_to: int) -> str:
-    """Nombre saneado (solo `A-Za-z0-9._-`); si no queda nada útil, uno derivado del rango."""
+def export_filename(
+    requested: str | None, interval: Interval, ts_from: int, ts_to: int, ext: str = "csv"
+) -> str:
+    """Nombre saneado (solo `A-Za-z0-9._-`); si no queda nada útil, uno derivado del rango.
+
+    Tanto el nombre pedido como el derivado terminan en `.ext` (se agrega si falta, sin importar mayúsculas).
+    """
     safe = re.sub(r"[^A-Za-z0-9._-]+", "_", requested or "")[:FILENAME_MAX_LEN]
     if re.search(r"[A-Za-z0-9]", safe):
-        return safe
-    return f"ves_rates_{interval.value}_{agg.to_local(ts_from).date()}_{agg.to_local(ts_to - 1).date()}.csv"
+        return safe if safe.lower().endswith(f".{ext}") else f"{safe}.{ext}"
+    first, last = agg.to_local(ts_from).date(), agg.to_local(ts_to - 1).date()
+    return f"ves_rates_{interval.value}_{first}_{last}.{ext}"

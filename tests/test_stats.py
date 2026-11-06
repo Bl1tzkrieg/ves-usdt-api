@@ -1,17 +1,14 @@
-"""Pruebas de `/stats` y `/daily-change` con el fixture de 10 días de `test_api.py`."""
+"""Pruebas de `/stats` y `/daily-change` con el fixture de 10 días de `conftest.py`."""
 
 from __future__ import annotations
 
 import pytest
-import test_api
+from conftest import T0
 from fastapi.testclient import TestClient
 
 from app import db as dbmod
 from app.db import Database, Tick
 from app.main import app
-
-T0 = test_api.T0
-client = test_api.client  # fixture compartido: 10 días desde T0
 
 STATS = "/api/v1/rates/stats"
 DAILY = "/api/v1/rates/daily-change"

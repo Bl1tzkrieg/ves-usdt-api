@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     max_range_days: int = 7300
     max_fill_buckets: int = 100_000
 
+    # Tope de celdas (puntos x columnas por hoja) de un libro .xlsx; más allá se pide history.csv
+    export_max_cells: int = Field(400_000, ge=1_000)
+
     # Tamaño máximo del CSV subido a /import (bytes)
     import_max_bytes: int = 10_000_000
 

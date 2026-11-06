@@ -34,7 +34,10 @@ python -m scripts.backfill csv --source bcv --file bcv.csv
 | `app/db.py` | SQLite: tabla `ticks`, `Tick`, insertar, reemplazar y consultas de lectura |
 | `app/aggregation.py` | `Interval`, `Fill`, `CandleField`, velas, rollup semanal y mensual, relleno de huecos, downsample |
 | `app/series.py` | Interpreta fechas y rangos y arma series raw o de velas; lanza `InvalidQuery` |
-| `app/csv_export.py` | Filas raw, long y wide, formato numérico, emisión por bloques, nombre de archivo |
+| `app/csv_export.py` | Filas raw, long y wide, alineación por `t` (`align_by_t`), formato numérico, emisión por bloques, nombre de archivo |
+| `app/xlsx_export.py` | `build_workbook`: libro .xlsx con hoja `Resumen` (una columna `fuente (campo)` por fuente y gráfico nativo hasta 5000 filas) y una hoja por fuente |
+| `app/exports_guard.py` | `run_heavy`: semáforo que serializa las construcciones de XLSX y PDF |
+| `app/pdf_report.py` | `parse_month`, `month_bounds`, `summarize` y `build_monthly_report`: informe mensual en PDF (reportlab + gráfico matplotlib Agg) |
 | `app/tick_parsing.py` | Parser de fechas, precios y filas a `Tick`, compartido por `/import` y `scripts/backfill.py` |
 | `app/security.py` | `require_api_key`, `ImportGuardMiddleware` y cabeceras de seguridad con CSP |
 | `app/stats.py` | Variaciones 24h/7d/30d, spread contra referencia y variación diaria |
@@ -42,7 +45,7 @@ python -m scripts.backfill csv --source bcv --file bcv.csv
 | `app/collector.py` | Recolector en segundo plano con lock y separación mínima de 30 s |
 | `app/models.py` | Modelos Pydantic de respuesta |
 | `app/routers/common.py` | Prefijo, resolución de fuentes y `HistoryQuery` |
-| `app/routers/history.py` | `/sources`, `/latest`, `/history`, `/history.csv` |
+| `app/routers/history.py` | `/sources`, `/latest`, `/history`, `/history.csv`, `/history.xlsx`, `/report.pdf` |
 | `app/routers/stream.py` | `/stream` por SSE |
 | `app/routers/stats.py` | `/stats`, `/daily-change` |
 | `app/routers/admin.py` | `/collect`, `/collector`, `/import` |
@@ -50,6 +53,7 @@ python -m scripts.backfill csv --source bcv --file bcv.csv
 | `scripts/backfill.py` | Carga histórica: modos `yadio`, `json`, `pydolarve`, `csv`, `peek` |
 | `scripts/seed_demo.py` | Datos sintéticos para desarrollo |
 | `scripts/screenshot.py` | Levanta la app con datos sintéticos y captura la página en claro, oscuro y móvil en `docs/screenshots/` |
+| `tests/conftest.py` | Fixture `client` con BD en memoria y 10 días de ticks desde `T0`, compartido por las pruebas de API |
 | `static/` | `index.html`, `styles.css`, `app.js` y Chart.js vendorizado. Nada de JS inline: la CSP lo bloquea |
 
 ## Planes
