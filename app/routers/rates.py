@@ -4,10 +4,8 @@ from __future__ import annotations
 import asyncio
 import csv
 import io
-import json
-from typing import AsyncIterator
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 
 from .. import aggregation as agg
@@ -21,22 +19,13 @@ from ..models import HistoryResponse, ImportResult, LatestPoint, SourceInfo
 from ..series import build_series, resolve_range
 from ..sources import DEFAULT_SOURCE, REGISTRY
 from ..tick_parsing import PRICE_KEYS, SOURCE_KEYS, TS_KEYS, decimal_hint_for, rows_to_ticks, sniff_dialect
+from .common import resolve_sources, resolve_sources_or_all
 
 router = APIRouter(prefix="/api/v1/rates", tags=["rates"])
 
 TZ_LABEL = f"UTC{settings.tz_offset_hours:+d}"
 IMPORT_REJECTED_SAMPLE = 10
 _READ_CHUNK = 1 << 20  # 1 MiB
-
-
-# ------------------------------------------------------------------ helpers de parámetros
-
-def _resolve_sources(raw: str | None) -> list[str]:
-    names = [s.strip() for s in (raw or DEFAULT_SOURCE).split(",") if s.strip()]
-    unknown = [n for n in names if n not in REGISTRY]
-    if unknown:
-        raise HTTPException(422, f"Fuente(s) desconocida(s): {unknown}. Disponibles: {sorted(REGISTRY)}")
-    return names
 
 
 # ------------------------------------------------------------------ endpoints
@@ -63,7 +52,7 @@ async def list_sources():
 
 @router.get("/latest", response_model=list[LatestPoint])
 async def latest(sources: str | None = Query(None, description="Lista separada por comas; vacío = todas")):
-    names = _resolve_sources(sources) if sources else list(REGISTRY)
+    names = resolve_sources_or_all(sources)
     ticks = await asyncio.to_thread(get_db().latest, names)
     return [LatestPoint(source=t.source, t=t.ts, date=agg.local_iso(t.ts), price=t.price, extra=t.extra) for t in ticks]
 
@@ -83,7 +72,7 @@ async def history(
     max_points: int = Query(0, ge=0, description="Solo interval=raw: reduce a ~N puntos (0 = el tope del servidor, `raw_max_points`)"),
 ):
     ts_from, ts_to = resolve_range(start, end, days)
-    names = _resolve_sources(sources)
+    names = resolve_sources(sources)
     series = []
     for name in names:
         points = await asyncio.to_thread(build_series, name, ts_from, ts_to, interval, fill, max_points)
@@ -118,7 +107,7 @@ async def history_csv(
     if dec == sep:
         raise HTTPException(422, "`decimal` no puede ser igual a `sep`.")
     ts_from, ts_to = resolve_range(start, end, days)
-    names = _resolve_sources(sources)
+    names = resolve_sources(sources)
     data = {
         n: await asyncio.to_thread(build_series, n, ts_from, ts_to, interval, fill, max_points) for n in names
     }
@@ -129,32 +118,6 @@ async def history_csv(
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{name}"'},
     )
-
-
-@router.get("/stream", summary="Server-Sent Events con el último valor de cada fuente (para gráfica en vivo)")
-async def stream(request: Request, sources: str | None = None, every: int = Query(15, ge=2, le=3600)):
-    names = _resolve_sources(sources) if sources else list(REGISTRY)
-
-    async def gen() -> AsyncIterator[str]:
-        last_sent: dict[str, int] = {}
-        while True:
-            if await request.is_disconnected():
-                break
-            ticks = await asyncio.to_thread(get_db().latest, names)
-            fresh = [t for t in ticks if last_sent.get(t.source) != t.ts]
-            if fresh:
-                payload = [
-                    {"source": t.source, "t": t.ts, "date": agg.local_iso(t.ts), "price": t.price, "extra": t.extra}
-                    for t in fresh
-                ]
-                yield f"event: rates\ndata: {json.dumps(payload)}\n\n"
-                last_sent.update({t.source: t.ts for t in fresh})
-            else:
-                yield ": keep-alive\n\n"
-            await asyncio.sleep(every)
-
-    return StreamingResponse(gen(), media_type="text/event-stream",
-                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 @router.post("/collect", summary="Forzar una recolección inmediata de todas las fuentes",
