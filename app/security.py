@@ -1,4 +1,5 @@
 """Seguridad: API key para endpoints de escritura y cabeceras de seguridad."""
+
 from __future__ import annotations
 
 import hmac
@@ -46,8 +47,9 @@ class ImportGuardMiddleware:
     """ASGI puro: valida `POST /import` antes de leer el cuerpo.
 
     FastAPI parsea el multipart antes de ejecutar las dependencias, así que sin esto un cliente
-    sin clave podría subir un archivo ilimitado a disco. Comprueba `X-API-Key` (503/401) y exige
-    `Content-Length` (411) no mayor que `import_max_bytes` + 64 KiB (413).
+    sin clave podría subir un archivo ilimitado a disco. Comprueba `X-API-Key` (503/401), rechaza
+    `Transfer-Encoding` (411: el tamaño no se conoce de antemano) y exige `Content-Length` (411)
+    no mayor que `import_max_bytes` + 64 KiB (413).
     """
 
     def __init__(self, app: ASGIApp) -> None:
@@ -65,6 +67,8 @@ class ImportGuardMiddleware:
     def _check(headers: Headers) -> HTTPException | None:
         if error := api_key_error(headers.get("x-api-key")):
             return error
+        if "transfer-encoding" in headers:
+            return HTTPException(411, "No se admite Transfer-Encoding; envíe el archivo con Content-Length")
         raw_length = headers.get("content-length")
         if raw_length is None:
             return HTTPException(411, "Se requiere la cabecera Content-Length")
@@ -100,7 +104,10 @@ class SecurityHeadersMiddleware:
         async def send_with_headers(message: Message) -> None:
             if message["type"] == "http.response.start":
                 present = {k.lower() for k, _ in message.get("headers", [])}
-                message["headers"] = [*message.get("headers", []), *(h for h in headers if h[0] not in present)]
+                message["headers"] = [
+                    *message.get("headers", []),
+                    *(h for h in headers if h[0] not in present),
+                ]
             await send(message)
 
         await self.app(scope, receive, send_with_headers)

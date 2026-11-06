@@ -4,22 +4,24 @@ Arranque:  uvicorn app.main:app --reload
 Docs:      http://localhost:8000/docs
 Gráfica:   http://localhost:8000/
 """
+
 from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .collector import collector
 from .config import settings
 from .db import get_db
-from .routers import rates
+from .routers import admin, history, stream
 from .security import ImportGuardMiddleware, SecurityHeadersMiddleware
+from .series import InvalidQuery
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
@@ -56,7 +58,16 @@ app.add_middleware(
         p for p in (app.docs_url, app.redoc_url, app.swagger_ui_oauth2_redirect_url, app.openapi_url) if p
     },
 )
-app.include_router(rates.router)
+app.include_router(history.router)
+app.include_router(stream.router)
+app.include_router(admin.router)
+
+
+@app.exception_handler(InvalidQuery)
+async def invalid_query_handler(_: Request, exc: InvalidQuery) -> JSONResponse:
+    return JSONResponse({"detail": str(exc)}, status_code=422)
+
+
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 

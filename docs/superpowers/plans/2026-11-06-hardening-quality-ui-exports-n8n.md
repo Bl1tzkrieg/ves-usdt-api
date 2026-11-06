@@ -43,15 +43,21 @@
 - [ ] **Step 1: Escribir pruebas que fallan**
 
 ```python
-@pytest.mark.parametrize("ts,price", [(0, 1.0), (4_102_444_800, 1.0), (1, 0.0), (1, -1.0), (1, float("inf")), (1, float("nan"))])
+@pytest.mark.parametrize(
+    "ts,price", [(0, 1.0), (4_102_444_800, 1.0), (1, 0.0), (1, -1.0), (1, float("inf")), (1, float("nan"))]
+)
 def test_tick_rejects_invalid(ts, price):
     with pytest.raises(ValueError):
         Tick("bcv", ts, price)
 
+
 def test_replace_ticks_is_atomic(monkeypatch):
-    db = Database(":memory:"); db.insert_ticks([Tick("bcv", 100, 1.0), Tick("bcv", 200, 2.0)])
+    db = Database(":memory:")
+    db.insert_ticks([Tick("bcv", 100, 1.0), Tick("bcv", 200, 2.0)])
     bad = [Tick("bcv", 150, 3.0), Tick("bcv", 160, 4.0)]
-    monkeypatch.setattr(db._conn, "executemany", lambda *a, **k: (_ for _ in ()).throw(sqlite3.OperationalError("disk full")))
+    monkeypatch.setattr(
+        db._conn, "executemany", lambda *a, **k: (_ for _ in ()).throw(sqlite3.OperationalError("disk full"))
+    )
     with pytest.raises(sqlite3.OperationalError):
         db.replace_ticks(bad)
     assert [t.ts for t in db.raw("bcv", 0, 10**9)] == [100, 200]  # nada borrado

@@ -1,6 +1,22 @@
 const API = '/api/v1/rates';
+const ALL_TIME_DAYS = 7300; // = max_range_days del servidor
 const state = { days: 30, sources: ['binance_p2p', 'bcv'], catalog: [] };
 const $ = (id) => document.getElementById(id);
+async function getJson(url) {
+  const res = await fetch(url);
+  if (!res.ok) {
+    let detail = `Error ${res.status}`;
+    try {
+      const body = await res.json();
+      if (typeof body.detail === 'string') detail = body.detail;
+      else if (body.detail) detail = JSON.stringify(body.detail);
+    } catch (_) { /* cuerpo no JSON */ }
+    throw new Error(detail);
+  }
+  return res.json();
+}
+// Valor a graficar de un punto: precio en raw, el campo elegido (open/close/avg...) en velas
+const pointValue = (p, interval, valueKey) => (interval === 'raw' ? p.price : p[valueKey]);
 const cssVar = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 const fmt = new Intl.NumberFormat('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtDate = (iso, interval) => interval === 'raw' || interval === 'hour'
@@ -35,7 +51,7 @@ function ensureChart() {
 function params(extra = {}) {
   const p = new URLSearchParams();
   const start = $('start').value, end = $('end').value;
-  if (start) p.set('start', start); else if (state.days > 0) p.set('days', state.days); else p.set('start', '2000-01-01');
+  if (start) p.set('start', start); else p.set('days', state.days > 0 ? state.days : ALL_TIME_DAYS);
   if (end) p.set('end', end);
   p.set('interval', $('interval').value);
   p.set('fill', $('fill').value);
@@ -49,9 +65,9 @@ let lastData;
 async function load() {
   if (!state.sources.length) return;
   $('status').textContent = 'Cargando…';
-  const res = await fetch(`${API}/history?${params()}`);
-  if (!res.ok) { $('status').textContent = `Error ${res.status}`; return; }
-  lastData = await res.json();
+  try {
+    lastData = await getJson(`${API}/history?${params()}`);
+  } catch (e) { $('status').textContent = e.message; return; }
   render(lastData);
 }
 
@@ -63,7 +79,7 @@ function render(data) {
   const labels = [...labelSet].sort();
   c.data.labels = labels.map((l) => fmtDate(l, interval));
   c.data.datasets = data.series.map((s) => {
-    const by = new Map(s.points.map((p) => [p.date, interval === 'raw' ? p.price : p[valueKey]]));
+    const by = new Map(s.points.map((p) => [p.date, pointValue(p, interval, valueKey)]));
     const color = cssVar(`--s-${s.source}`) || '#888';
     return { label: `${s.label} (${s.unit})`, data: labels.map((l) => by.has(l) ? by.get(l) : null),
              borderColor: color, backgroundColor: color, spanGaps: true, pointStyle: 'circle' };
@@ -77,14 +93,15 @@ function render(data) {
 function renderTable(data, labels, valueKey) {
   const wrap = $('table-wrap');
   if (wrap.hidden) return;
-  const rows = labels.map((l) => `<tr><td>${fmtDate(l, data.interval)}</td>${data.series.map((s) => {
-    const p = s.points.find((x) => x.date === l); const v = p ? (data.interval === 'raw' ? p.price : p[valueKey]) : null;
+  const byDate = data.series.map((s) => new Map(s.points.map((p) => [p.date, pointValue(p, data.interval, valueKey)])));
+  const rows = labels.map((l) => `<tr><td>${fmtDate(l, data.interval)}</td>${byDate.map((m) => {
+    const v = m.get(l);
     return `<td>${v == null ? '—' : fmt.format(v)}</td>`; }).join('')}</tr>`);
   wrap.innerHTML = `<table><thead><tr><th>Fecha</th>${data.series.map((s) => `<th>${s.label}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table>`;
 }
 
 async function loadCatalog() {
-  state.catalog = await (await fetch(`${API}/sources`)).json();
+  state.catalog = await getJson(`${API}/sources`);
   $('sources').innerHTML = state.catalog.map((s) => `<label><input type="checkbox" value="${s.name}" ${state.sources.includes(s.name) ? 'checked' : ''}>
      <span class="swatch" style="background:${cssVar(`--s-${s.name}`)}"></span>${s.label}</label>`).join('');
   $('sources').querySelectorAll('input').forEach((cb) => cb.addEventListener('change', () => {
@@ -93,7 +110,8 @@ async function loadCatalog() {
 }
 
 async function loadLatest() {
-  const latest = await (await fetch(`${API}/latest`)).json();
+  let latest;
+  try { latest = await getJson(`${API}/latest`); } catch { return; }
   $('tiles').innerHTML = latest.map((p) => {
     const meta = state.catalog.find((s) => s.name === p.source) || { label: p.source, unit: '' };
     const extra = p.extra && p.extra.buy ? `compra ${fmt.format(p.extra.buy)} · venta ${fmt.format(p.extra.sell)}` : '';

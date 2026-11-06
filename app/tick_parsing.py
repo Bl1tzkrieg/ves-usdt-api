@@ -1,4 +1,5 @@
 """Parseo tolerante de fechas, precios y filas a `Tick`, compartido por `/import` y `scripts/backfill`."""
+
 from __future__ import annotations
 
 import csv
@@ -138,15 +139,17 @@ def _resolve_ambiguous(text: str, sep: str, decimal_hint: str | None) -> str | N
         return None
     if sep == decimal_hint:
         return text if text.count(sep) == 1 else None
-    return text.replace(sep, "") if re.fullmatch(rf"[+-]?\d{{1,3}}(?:{re.escape(sep)}\d{{3}})+", text) else None
+    return (
+        text.replace(sep, "") if re.fullmatch(rf"[+-]?\d{{1,3}}(?:{re.escape(sep)}\d{{3}})+", text) else None
+    )
 
 
 def decimal_hint_for(delimiter: str) -> str | None:
     """Separador decimal implícito por el delimitador del CSV (así escribe `history.csv`).
 
-    `;` ⇒ decimal `,`; `,` ⇒ decimal `.`; cualquier otro ⇒ sin pista.
+    `;` ⇒ decimal `,`; `,` y tabulador ⇒ decimal `.`; cualquier otro ⇒ sin pista.
     """
-    return {";": ",", ",": "."}.get(delimiter)
+    return {";": ",", ",": ".", "\t": "."}.get(delimiter)
 
 
 def sniff_dialect(sample: str) -> type[csv.Dialect]:
@@ -179,7 +182,11 @@ def find_list(data: Any, list_key: str | None) -> list:
 
 
 def _pick_parsed(
-    row: Mapping[str, Any], explicit: str | None, candidates: tuple[str, ...], parse: Callable[[Any], Any], label: str
+    row: Mapping[str, Any],
+    explicit: str | None,
+    candidates: tuple[str, ...],
+    parse: Callable[[Any], Any],
+    label: str,
 ) -> Any:
     """Primer valor no vacío de las columnas candidatas que se deje interpretar; ValueError si ninguno."""
     keys = (explicit.lower().strip(),) if explicit else tuple(k for k in candidates if k in row)
@@ -253,7 +260,9 @@ def rows_to_ticks(
     result = ParseResult()
     for n, item in enumerate(rows, start=1):
         try:
-            result.ticks.append(_row_to_tick(item, default_source, ts_key, price_key, allowed_sources, decimal_hint))
+            result.ticks.append(
+                _row_to_tick(item, default_source, ts_key, price_key, allowed_sources, decimal_hint)
+            )
         except ValueError as e:
             result.rejected.append({"row": n, "reason": str(e)})
     return result

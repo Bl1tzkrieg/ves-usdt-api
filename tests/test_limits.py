@@ -1,4 +1,5 @@
 """Guardas de rango/tamaño, entradas malformadas y endurecimiento de fuentes."""
+
 from __future__ import annotations
 
 import asyncio
@@ -46,7 +47,9 @@ def test_explicit_range_over_limit_422(client):
 def test_fill_hour_19_years_422(client):
     r = client.get(H, params={"start": "2006-01-01", "end": "2025-01-01", "interval": "hour", "fill": "null"})
     assert r.status_code == 422
-    r = client.get(H + ".csv", params={"start": "2006-01-01", "end": "2025-01-01", "interval": "hour", "fill": "forward"})
+    r = client.get(
+        H + ".csv", params={"start": "2006-01-01", "end": "2025-01-01", "interval": "hour", "fill": "forward"}
+    )
     assert r.status_code == 422
 
 
@@ -68,12 +71,22 @@ def test_raw_capped_by_raw_max_points(client, monkeypatch):
     assert len(pts) == 1000
     assert pts[0]["t"] == T0 and pts[-1]["t"] == T0 + 2499 * 60
     # un max_points mayor al tope no lo supera
-    p = client.get(H, params={"start": T0, "end": T0 + 3 * 86400, "interval": "raw", "sources": "yadio", "max_points": 5000})
+    p = client.get(
+        H,
+        params={
+            "start": T0,
+            "end": T0 + 3 * 86400,
+            "interval": "raw",
+            "sources": "yadio",
+            "max_points": 5000,
+        },
+    )
     assert len(p.json()["series"][0]["points"]) == 1000
 
 
 def test_downsample_exact_count_and_endpoints():
     from app.aggregation import downsample
+
     ticks = [Tick("yadio", T0 + i, 1.0) for i in range(25_000)]
     for m in (2, 3, 7, 20_000, 24_999):
         out = downsample(ticks, m)
@@ -102,6 +115,7 @@ def test_collect_not_skipped_when_all_sources_fail(client, monkeypatch):
     monkeypatch.setattr(collector, "last_run", None)
     r = client.post("/api/v1/rates/collect")
     assert r.status_code == 200 and r.json()["collected"] == [] and r.json()["skipped"] is False
+
 
 def test_raw_default_cap_is_20000():
     assert Settings(_env_file=None).raw_max_points == 20_000
@@ -134,6 +148,7 @@ def test_empty_sep_and_decimal_422(client):
 def _bcv(fecha):
     def handler(req):
         return httpx.Response(200, json={"promedio": 832.49, "fechaActualizacion": fecha})
+
     return httpx.AsyncClient(transport=httpx.MockTransport(handler))
 
 
@@ -183,6 +198,7 @@ def test_collector_interval_min_30():
 
 def test_collector_loop_logs_in_progress_at_info(caplog):
     import logging
+
     from app.collector import CollectInProgress
 
     async def scenario():
@@ -197,12 +213,17 @@ def test_collector_loop_logs_in_progress_at_info(caplog):
 
     with caplog.at_level(logging.INFO, logger="rates.collector"):
         asyncio.run(scenario())
-    recs = [r for r in caplog.records if "en curso" in r.getMessage().lower() or "progress" in r.getMessage().lower()]
+    recs = [
+        r
+        for r in caplog.records
+        if "en curso" in r.getMessage().lower() or "progress" in r.getMessage().lower()
+    ]
     assert recs and all(r.levelno == logging.INFO and r.exc_info is None for r in recs)
 
 
 def test_collect_reports_skipped(client, monkeypatch):
     from app.collector import collector
+
     monkeypatch.setattr(collector, "last_run", __import__("time").time())
     r = client.post("/api/v1/rates/collect")
     assert r.status_code == 200 and r.json()["skipped"] is True and r.json()["collected"] == []
@@ -213,6 +234,7 @@ def test_seed_demo_refuses_non_empty_db(monkeypatch):
     mem.insert_ticks([Tick("yadio", T0, 50.0)])
     dbmod.set_db(mem)
     from scripts import seed_demo
+
     monkeypatch.setattr(sys, "argv", ["seed_demo", "--days", "1"])
     try:
         with pytest.raises(SystemExit) as ei:
@@ -229,6 +251,7 @@ def test_seed_demo_refuses_non_empty_db(monkeypatch):
 def test_seed_demo_runs_on_empty_db(monkeypatch):
     dbmod.set_db(Database(":memory:"))
     from scripts import seed_demo
+
     monkeypatch.setattr(sys, "argv", ["seed_demo", "--days", "2"])
     try:
         seed_demo.main()

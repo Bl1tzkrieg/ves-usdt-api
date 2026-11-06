@@ -1,4 +1,5 @@
 """Pruebas de la capa de base de datos: validación de Tick y reemplazo transaccional."""
+
 from __future__ import annotations
 
 import sqlite3
@@ -23,14 +24,16 @@ def test_tick_accepts_valid():
 
 def test_replace_ticks_replaces_range_per_source():
     db = Database(":memory:")
-    db.insert_ticks([Tick("bcv", 100, 1.0), Tick("bcv", 200, 2.0), Tick("bcv", 300, 3.0), Tick("yadio", 150, 9.0)])
+    db.insert_ticks(
+        [Tick("bcv", 100, 1.0), Tick("bcv", 200, 2.0), Tick("bcv", 300, 3.0), Tick("yadio", 150, 9.0)]
+    )
     inserted = db.replace_ticks([Tick("bcv", 100, 5.0), Tick("bcv", 200, 6.0)])
     assert inserted == 2
     assert [(t.ts, t.price) for t in db.raw("bcv", 0, 10**9)] == [(100, 5.0), (200, 6.0), (300, 3.0)]
     assert [t.ts for t in db.raw("yadio", 0, 10**9)] == [150]
 
 
-def test_replace_ticks_is_atomic(monkeypatch):
+def test_replace_ticks_is_atomic():
     db = Database(":memory:")
     db.insert_ticks([Tick("bcv", 100, 1.0), Tick("bcv", 200, 2.0)])
     bad = [Tick("bcv", 100, 3.0), Tick("bcv", 200, 4.0)]  # el DELETE cubre las filas existentes
