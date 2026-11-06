@@ -75,13 +75,6 @@ class Database:
             )
             return cur.rowcount
 
-    def delete_range(self, source: str, ts_from: int, ts_to: int) -> int:
-        with self._lock, self._conn:
-            cur = self._conn.execute(
-                "DELETE FROM ticks WHERE source = ? AND ts >= ? AND ts < ?", (source, ts_from, ts_to)
-            )
-            return cur.rowcount
-
     def replace_ticks(self, ticks: Sequence[Tick]) -> int:
         """Borra el rango [min ts, max ts] de cada fuente e inserta `ticks`, todo en una transacción."""
         rows = [

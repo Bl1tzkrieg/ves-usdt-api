@@ -26,7 +26,9 @@ class Interval(str, Enum):
     month = "month"
 
 
-class Value(str, Enum):
+class CandleField(str, Enum):
+    """Campo de una vela que se exporta por columna (CSV `layout=wide`)."""
+
     close = "close"
     open = "open"
     avg = "avg"
@@ -213,7 +215,3 @@ def downsample(ticks: list[Tick], max_points: int) -> list[Tick]:
     # max_points índices equidistantes de 0 a len-1 (ambos incluidos); distintos porque el paso es > 1
     step = (len(ticks) - 1) / (max_points - 1)
     return [ticks[round(i * step)] for i in range(max_points - 1)] + [ticks[-1]]
-
-
-def pick(candle: Candle, value: Value) -> float | None:
-    return getattr(candle, value.value)

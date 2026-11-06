@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFil
 from fastapi.responses import StreamingResponse
 
 from .. import aggregation as agg
-from ..aggregation import Candle, Fill, Interval, Value
+from ..aggregation import CandleField, Fill, Interval
 from ..collector import CollectInProgress, collector
 from ..config import settings
 from ..db import get_db
@@ -107,7 +107,7 @@ async def history_csv(
     sources: str | None = None,
     interval: Interval = Interval.day,
     fill: Fill = Fill.none,
-    value: Value = Query(Value.close, description="Solo layout=wide: qué valor de la vela usar por columna"),
+    value: CandleField = Query(CandleField.close, description="Solo layout=wide: qué valor de la vela usar por columna"),
     layout: str = Query("long", pattern="^(long|wide)$", description="long: una fila por fuente y fecha con OHLC. wide: una columna por fuente."),
     max_points: int = Query(0, ge=0),
     sep: str = Query(",", min_length=1, max_length=1, description="Separador de columnas (use ';' para Excel en español)"),
