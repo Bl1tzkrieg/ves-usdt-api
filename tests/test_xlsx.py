@@ -9,7 +9,7 @@ import pytest
 from openpyxl import load_workbook
 
 from app.aggregation import CandleField, Interval
-from app.xlsx_export import PRICE_FORMAT, build_workbook
+from app.xlsx_export import MAX_CHART_ROWS, PRICE_FORMAT, build_workbook
 
 XLSX = "/api/v1/rates/history.xlsx"
 XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -30,7 +30,7 @@ def test_xlsx_day_summary_sheet(client):
     wb = _workbook(client.get(XLSX, params=RANGE))
     assert wb.sheetnames == ["Resumen", "binance_p2p", "bcv"]
     ws = wb["Resumen"]
-    assert _row(ws, 1) == ["date", "binance_p2p", "bcv"]
+    assert _row(ws, 1) == ["date", "binance_p2p (close)", "bcv (close)"]
     assert all(c.font.bold for c in ws[1])
     assert isinstance(ws["A2"].value, datetime)
     assert ws["A2"].value == datetime(2025, 1, 1)  # medianoche local, sin zona
@@ -60,6 +60,7 @@ def test_xlsx_per_source_sheet_has_ohlc(client):
 
 def test_xlsx_value_selects_candle_field(client):
     ws = _workbook(client.get(XLSX, params={**RANGE, "value": "avg"}))["Resumen"]
+    assert _row(ws, 1) == ["date", "binance_p2p (avg)", "bcv (avg)"]
     assert ws["B2"].value == pytest.approx(100.14)
 
 
@@ -67,7 +68,7 @@ def test_xlsx_raw_interval(client):
     params = {"start": "2025-01-01", "end": "2025-01-01", "sources": "binance_p2p", "interval": "raw"}
     wb = _workbook(client.get(XLSX, params=params))
     summary = wb["Resumen"]
-    assert _row(summary, 1) == ["date", "binance_p2p"]
+    assert _row(summary, 1) == ["date", "binance_p2p (price)"]
     assert summary["A2"].value == datetime(2025, 1, 1, 8)
     assert summary["A2"].number_format == "yyyy-mm-dd hh:mm:ss"
     assert summary["B2"].value == pytest.approx(100.08)
@@ -103,5 +104,17 @@ def test_xlsx_route_is_in_openapi(client):
 def test_build_workbook_without_data_has_headers_and_no_chart():
     wb = load_workbook(BytesIO(build_workbook({"bcv": []}, ["bcv"], Interval.day, CandleField.close)))
     assert wb.sheetnames == ["Resumen", "bcv"]
-    assert _row(wb["Resumen"], 1) == ["date", "bcv"]
+    assert _row(wb["Resumen"], 1) == ["date", "bcv (close)"]
     assert wb["Resumen"]._charts == []
+
+
+def test_build_workbook_skips_chart_above_row_cap():
+    def points(n: int) -> list[dict]:
+        return [{"t": 1_735_704_000 + i, "price": 100.0, "extra": None} for i in range(n)]
+
+    at_cap = build_workbook({"bcv": points(MAX_CHART_ROWS)}, ["bcv"], Interval.raw, CandleField.close)
+    assert len(load_workbook(BytesIO(at_cap))["Resumen"]._charts) == 1
+    above = build_workbook({"bcv": points(MAX_CHART_ROWS + 1)}, ["bcv"], Interval.raw, CandleField.close)
+    ws = load_workbook(BytesIO(above))["Resumen"]
+    assert ws._charts == []
+    assert ws.max_row == MAX_CHART_ROWS + 2

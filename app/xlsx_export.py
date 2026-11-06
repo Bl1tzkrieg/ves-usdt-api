@@ -6,19 +6,21 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import datetime
 from io import BytesIO
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from openpyxl import Workbook
 from openpyxl.cell import WriteOnlyCell
 from openpyxl.chart import LineChart, Reference
 from openpyxl.styles import Font
 from openpyxl.utils import get_column_letter
-from openpyxl.worksheet._write_only import WriteOnlyWorksheet as Sheet
 
 from . import aggregation as agg
 from .aggregation import CandleField, Interval
 from .config import settings
 from .csv_export import Series, align_by_t
+
+if TYPE_CHECKING:  # módulo privado de openpyxl: solo para anotar, nunca en tiempo de ejecución
+    from openpyxl.worksheet._write_only import WriteOnlyWorksheet as Sheet
 
 XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 SUMMARY_SHEET = "Resumen"
@@ -26,6 +28,7 @@ PRICE_FORMAT = "#,##0.0000"
 COUNT_FORMAT = "0"
 SHEET_NAME_MAX_LEN = 31  # límite de Excel
 HEADER_FONT = Font(bold=True)
+MAX_CHART_ROWS = 5000  # más filas y Excel se arrastra al redibujar el gráfico; los datos siguen completos
 
 CANDLE_FIELDS = ("open", "high", "low", "close", "avg")
 RAW_EXTRA_FIELDS = ("buy", "sell")
@@ -35,7 +38,8 @@ def build_workbook(data: Series, names: list[str], interval: Interval, field: Ca
     """Libro .xlsx en memoria a partir de la salida de `series.build_series` por fuente.
 
     `Resumen`: fecha + una columna por fuente (en raw, el precio; si no, el campo `field` de la vela),
-    alineadas por `t`. Luego una hoja por fuente. Fechas como fecha real de Excel en hora local, sin zona.
+    alineadas por `t`, con cabecera `fuente (campo)`; sin gráfico si pasa de `MAX_CHART_ROWS` filas.
+    Luego una hoja por fuente. Fechas como fecha real de Excel en hora local, sin zona.
     Modo `write_only`: las filas se vuelcan al escribirse, sin un objeto por celda en memoria.
     """
     wb = Workbook(write_only=True)
@@ -43,7 +47,7 @@ def build_workbook(data: Series, names: list[str], interval: Interval, field: Ca
     ordered = {n: data[n] for n in names}
     raw = interval is Interval.raw
     n_rows = _write_summary(summary, ordered, interval, "price" if raw else field.value)
-    if n_rows:
+    if 0 < n_rows <= MAX_CHART_ROWS:
         _add_chart(summary, len(names), n_rows + 1, interval, field)
     for name in names:
         ws = wb.create_sheet(_sheet_name(name))
@@ -110,7 +114,9 @@ def _cell(ws: Sheet, value: Any, *, number_format: str | None = None, font: Font
 def _write_summary(ws: Sheet, data: Series, interval: Interval, key: str) -> int:
     """Escribe `Resumen` y devuelve cuántas filas de datos tiene."""
     rows = [[_excel_date(t), *values] for t, values in align_by_t(data, key)]
-    _write_table(ws, ["date", *data], rows, interval, [PRICE_FORMAT] * len(data))
+    _write_table(
+        ws, ["date", *(f"{name} ({key})" for name in data)], rows, interval, [PRICE_FORMAT] * len(data)
+    )
     return len(rows)
 
 

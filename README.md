@@ -1,6 +1,6 @@
 # VES / USDT Rates API
 
-API en FastAPI con el histórico del bolívar frente al USDT (Binance P2P, Yadio) y al dólar (BCV oficial, paralelo). Consulta cualquier rango de fechas, agrega por hora, día, semana o mes, exporta CSV y Excel y empuja el último valor por Server-Sent Events a una gráfica en vivo.
+API en FastAPI con el histórico del bolívar frente al USDT (Binance P2P, Yadio) y al dólar (BCV oficial, paralelo). Consulta cualquier rango de fechas, agrega por hora, día, semana o mes, exporta CSV, Excel y un informe mensual en PDF, y empuja el último valor por Server-Sent Events a una gráfica en vivo.
 
 Ninguna API pública da histórico USDT/VES completo y sin límites, así que este servicio lo construye. Un recolector consulta cada fuente cada 5 minutos y guarda cada observación como un tick `(source, ts, price)` en SQLite. Los endpoints agregan esos ticks al consultar, de modo que el costo depende de cuántos ticks caen en el rango y no de cuántos días se piden. El histórico anterior al despliegue se carga con `scripts/backfill.py` o con `POST /api/v1/rates/import`.
 
@@ -126,14 +126,32 @@ La misma consulta como libro de Excel. Acepta los parámetros de `/history` y lo
 
 El libro trae:
 
-- `Resumen`: una columna `date` y una columna por fuente con el `value` elegido, alineadas por fecha (celda vacía si una fuente no tiene esa cubeta). A la derecha de la tabla, un gráfico de líneas nativo de Excel que lee esas columnas.
+- `Resumen`: una columna `date` y una columna por fuente con el `value` elegido, con cabecera `fuente (campo)`, por ejemplo `binance_p2p (close)`, alineadas por fecha (celda vacía si una fuente no tiene esa cubeta). A la derecha de la tabla, un gráfico de líneas nativo de Excel que lee esas columnas. Con más de 5000 filas el gráfico se omite, porque Excel se vuelve lento al redibujarlo; los datos salen completos.
 - Una hoja por fuente con `date, open, high, low, close, avg, count`.
 - Con `interval=raw`, `Resumen` lleva el precio de cada tick por fuente y las hojas por fuente traen `date, price, buy, sell`.
 
-Las fechas son fechas reales de Excel en hora local (UTC-4) sin zona, los precios usan el formato `#,##0.0000`, y cada hoja tiene la cabecera congelada y autofiltro. El libro se arma en memoria; con `interval=raw` el tope de filas por fuente es `RATES_RAW_MAX_POINTS`.
+Las fechas son fechas reales de Excel en hora local (UTC-4) sin zona, los precios usan el formato `#,##0.0000`, y cada hoja tiene la cabecera congelada y autofiltro. El libro se arma en memoria; con `interval=raw` el tope de filas por fuente es `RATES_RAW_MAX_POINTS`. Esa es la exportación cara: con varias fuentes en raw, el libro lleva hasta `RATES_RAW_MAX_POINTS` filas por fuente en `Resumen` y otra vez en cada hoja, y todo pasa por memoria antes de enviarse. Para volúmenes grandes conviene `history.csv`, que se emite por bloques.
 
 ```bash
 curl -o tasas.xlsx "localhost:8000/api/v1/rates/history.xlsx?days=365&sources=binance_p2p,bcv&fill=forward"
+```
+
+### `GET /report.pdf`
+
+Informe de un mes en PDF, para imprimir o adjuntar.
+
+| Parámetro | Valores |
+|---|---|
+| `month` | Obligatorio. `YYYY-MM` en hora local. 422 si el formato no es ese o si el mes es futuro |
+| `sources` | Fuentes separadas por coma; vacío = todas las registradas |
+| `filename` | Igual que en `history.csv`; por defecto `ves_report_YYYY-MM.pdf` |
+
+Trae el mes en español ("Octubre 2026"), las fuentes y la hora de generación en UTC-4; una tabla resumen por fuente con apertura, cierre, mínimo, máximo, variación del mes y brecha media contra el BCV; un gráfico de cierres diarios con la paleta de la página; y la tabla diaria de cierres, una columna por fuente.
+
+Todo sale de velas diarias con `fill=forward`, así que los fines de semana del BCV repiten la última tasa oficial. En la tabla diaria esos valores van en gris cursiva, y apertura, cierre, mínimo y máximo solo usan días con cotización propia. La brecha media compara cada día con cotización propia contra el BCV vigente ese día, aunque el BCV no esté entre las fuentes pedidas. El mes en curso se corta en el día de hoy. Un mes sin datos devuelve igual un PDF que lo dice.
+
+```bash
+curl -o informe.pdf "localhost:8000/api/v1/rates/report.pdf?month=2026-10&sources=binance_p2p,bcv"
 ```
 
 ### Lectura y estado
@@ -222,7 +240,7 @@ En el modo `json` el script detecta por su cuenta dónde está la lista de punto
 - Cuatro tiles con el último precio, la variación a 24 h y una sparkline.
 - Gráfica principal con rangos rápidos o fechas libres, intervalo, valor, relleno y selección de fuentes.
 - Paneles de variación diaria (%) y de spread contra el BCV.
-- Botones de descarga CSV en `long` o `wide` y Excel. El de PDF se activa solo cuando existe `/report.pdf`. Ninguno descarga mientras la gráfica está cargando o si la última carga falló.
+- Botones de descarga CSV en `long` o `wide`, Excel e informe PDF del mes de la fecha final elegida (o del mes en curso). Ninguno descarga mientras la gráfica está cargando o si la última carga falló.
 - Interruptor para ver los datos como tabla.
 - Se actualiza sola con `/stream` (SSE).
 - En intervalo Hora con relleno, "Todo" se limita a ~11 años: el servidor admite hasta 100000 cubos.
@@ -266,4 +284,4 @@ Si tenía un cliente contra la versión inicial, esto rompe:
 
 ## Lo que viene
 
-Están planificados, todavía no existen: un informe mensual en PDF (fase D), y un flujo de n8n que dispare recolecciones y backfill diarios y avise por variaciones fuertes (fase E). El detalle está en `docs/superpowers/plans/2026-11-06-hardening-quality-ui-exports-n8n.md`.
+Está planificado, todavía no existe: un flujo de n8n que dispare recolecciones y backfill diarios y avise por variaciones fuertes (fase E). El detalle está en `docs/superpowers/plans/2026-11-06-hardening-quality-ui-exports-n8n.md`.

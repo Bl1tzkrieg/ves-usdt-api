@@ -1,19 +1,28 @@
-"""Endpoints de lectura: fuentes, último valor e histórico (JSON/CSV/XLSX)."""
+"""Endpoints de lectura: fuentes, último valor, histórico (JSON/CSV/XLSX) e informe mensual en PDF."""
 
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import Annotated, Any
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import Response, StreamingResponse
 
 from .. import aggregation as agg
-from ..aggregation import CandleField
+from ..aggregation import CandleField, Fill, Interval
 from ..config import settings
 from ..csv_export import Layout, csv_chunks, csv_rows, export_filename
 from ..db import get_db
 from ..models import HistoryResponse, LatestPoint, SourceInfo
+from ..pdf_report import (
+    PDF_MEDIA_TYPE,
+    REFERENCE_SOURCE,
+    build_monthly_report,
+    month_bounds,
+    parse_month,
+    summarize,
+)
 from ..series import build_series, tick_to_point
 from ..sources import REGISTRY
 from ..xlsx_export import XLSX_MEDIA_TYPE, build_workbook
@@ -137,4 +146,39 @@ async def history_xlsx(
         name += ".xlsx"
     return Response(
         content, media_type=XLSX_MEDIA_TYPE, headers={"Content-Disposition": f'attachment; filename="{name}"'}
+    )
+
+
+@router.get(
+    "/report.pdf",
+    summary="Informe mensual en PDF: resumen por fuente, gráfico de cierres y tabla diaria",
+    response_class=Response,
+    responses={200: {"content": {PDF_MEDIA_TYPE: {}}, "description": "Informe .pdf"}},
+)
+async def report_pdf(
+    month: str = Query(..., description="Mes a informar, YYYY-MM (hora local). No puede ser futuro."),
+    sources: str | None = Query(None, description="Fuentes separadas por coma; vacío = todas"),
+    filename: str | None = None,
+):
+    now = int(time.time())
+    first_day = parse_month(month, agg.to_local(now).date())
+    names = resolve_sources_or_all(sources)
+    ts_from, ts_to = month_bounds(first_day, now)
+
+    def load(name: str) -> list[dict[str, Any]]:
+        return build_series(name, ts_from, ts_to, Interval.day, Fill.forward, 0)
+
+    data = {n: await asyncio.to_thread(load, n) for n in names}
+    reference = data.get(REFERENCE_SOURCE)
+    if reference is None:  # la brecha contra el BCV se calcula aunque no se haya pedido como serie
+        reference = await asyncio.to_thread(load, REFERENCE_SOURCE)
+    stats = summarize(data, reference)
+    content = await asyncio.to_thread(build_monthly_report, first_day, data, stats)
+    name = export_filename(
+        filename or f"ves_report_{first_day:%Y-%m}.pdf", Interval.day, ts_from, ts_to, "pdf"
+    )
+    if not name.lower().endswith(".pdf"):
+        name += ".pdf"
+    return Response(
+        content, media_type=PDF_MEDIA_TYPE, headers={"Content-Disposition": f'attachment; filename="{name}"'}
     )
