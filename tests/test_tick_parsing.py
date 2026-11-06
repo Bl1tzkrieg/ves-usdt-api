@@ -5,7 +5,7 @@ import csv
 
 import pytest
 
-from app.tick_parsing import parse_price, parse_ts, rows_to_ticks, sniff_dialect
+from app.tick_parsing import decimal_hint_for, parse_price, parse_ts, rows_to_ticks, sniff_dialect
 
 # 2020-01-01 00:00 -04:00
 JAN1 = 1_577_851_200
@@ -154,3 +154,42 @@ def test_rows_to_ticks_prefers_date_over_time_and_falls_back_on_empty():
     assert [t.ts for t in res.ticks] == [JAN1, JAN1 + 86400, JAN1 + 2 * 86400]
     assert [r["row"] for r in res.rejected] == [4]
     assert "ausente" in res.rejected[0]["reason"]
+
+
+@pytest.mark.parametrize(
+    "value, hint, expected",
+    [
+        ("36,512", ",", 36.512),
+        ("1.234", ",", 1234.0),  # con decimal ',' el punto es agrupación
+        ("1.234.567", ",", 1234567.0),
+        ("100.125", ".", 100.125),
+        ("1,234", ".", 1234.0),
+        ("1,234,567", ".", 1234567.0),
+        ("5.5", ",", 5.5),  # no ambiguo: la pista no cambia nada
+        ("1,5", ".", 1.5),
+        ("1.234,56", ".", 1234.56),
+        ("1,2,3", ",", None),  # varios separadores decimales
+        ("12.34", ",", 12.34),
+        ("1.23.4", ",", None),  # agrupación mal formada
+        ("36,512", None, None),  # sin pista: se mantiene el rechazo por ambigüedad
+        ("100.125", None, None),
+    ],
+)
+def test_parse_price_decimal_hint(value, hint, expected):
+    assert parse_price(value, decimal_hint=hint) == expected
+
+
+@pytest.mark.parametrize("delimiter, hint", [(";", ","), (",", "."), ("\t", None), ("|", None)])
+def test_decimal_hint_for(delimiter, hint):
+    assert decimal_hint_for(delimiter) == hint
+
+
+def test_rows_to_ticks_decimal_hint_applies_to_price_and_extra():
+    res = rows_to_ticks(
+        [{"fecha": "2020-01-01", "precio": "36,512", "buy": "1.234"}],
+        default_source="bcv",
+        allowed_sources={"bcv"},
+        decimal_hint=",",
+    )
+    assert res.rejected == []
+    assert (res.ticks[0].price, res.ticks[0].extra) == (36.512, {"buy": 1234.0})

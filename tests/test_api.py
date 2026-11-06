@@ -135,9 +135,19 @@ def test_import_date_time_columns_and_empty_timestamp(client):
     assert r.json()["inserted"] == 1 and get_price(client, "bcv", 1_577_851_200 + 86400) == 6
 
 
-def test_import_ambiguous_price_rejected(client):
-    r = _import(client, "fecha,precio\n2020-01-01,\"1.234\"\n", source="bcv").json()
+def test_import_ambiguous_price_rejected_without_delimiter_hint(client):
+    # tabulador: el delimitador no sugiere separador decimal → se rechaza en vez de adivinar
+    r = _import(client, "fecha\tprecio\n2020-01-01\t1.234\n", source="bcv").json()
     assert (r["inserted"], r["rejected"]) == (0, 1)
+
+
+def test_import_ambiguous_price_resolved_by_delimiter(client):
+    r = _import(client, "fecha,precio\n2020-01-01,\"1.234\"\n", source="bcv").json()
+    assert (r["inserted"], r["rejected"]) == (1, 0)
+    assert get_price(client, "bcv", 1_577_851_200) == 1.234
+    r = _import(client, "fecha;precio\n2020-01-02;1.234\n", source="bcv").json()
+    assert (r["inserted"], r["rejected"]) == (1, 0)
+    assert get_price(client, "bcv", 1_577_851_200 + 86400) == 1234
 
 
 def test_import_rejected_sample_capped_at_10(client):
@@ -213,3 +223,22 @@ def test_import_replace_with_rejected_rows_422_and_writes_nothing(client):
 def test_import_without_replace_still_accepts_partial(client):
     r = _import(client, "fecha,precio\n2020-01-01,7\n2020-01-02,abc\n", source="bcv")
     assert r.status_code == 200 and (r.json()["inserted"], r.json()["rejected"]) == (1, 1)
+
+
+@pytest.mark.parametrize("sep", [";", ","])
+def test_history_csv_round_trip_with_replace(client, sep):
+    # precios con exactamente 3 decimales: ambiguos sin la pista del delimitador
+    db = dbmod.get_db()
+    db.insert_ticks([Tick("yadio", T0 + d * DAY + 3600, 36.512 + d) for d in range(5)])
+    db.insert_ticks([Tick("yadio", T0 + 5 * DAY + 3600, 1234.125)])
+    params = {"start": "2025-01-01", "end": "2025-01-06", "sources": "yadio", "sep": sep}
+    before = client.get("/api/v1/rates/history", params={k: v for k, v in params.items() if k != "sep"}).json()
+    exported = client.get("/api/v1/rates/history.csv", params=params)
+    assert exported.status_code == 200
+    r = _import(client, exported.content, source="yadio", replace="true")
+    assert r.status_code == 200, r.text
+    assert r.json()["rejected"] == 0
+    after = client.get("/api/v1/rates/history", params={k: v for k, v in params.items() if k != "sep"}).json()
+    closes = [p["close"] for p in after["series"][0]["points"]]
+    assert closes == [p["close"] for p in before["series"][0]["points"]]
+    assert closes == pytest.approx([36.512, 37.512, 38.512, 39.512, 40.512, 1234.125])

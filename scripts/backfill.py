@@ -37,14 +37,18 @@ import httpx
 from app.aggregation import LOCAL_TZ
 from app.db import Tick, get_db
 from app.sources import REGISTRY
-from app.tick_parsing import find_list, rows_to_ticks, sniff_dialect
+from app.tick_parsing import decimal_hint_for, find_list, rows_to_ticks, sniff_dialect
 
 
 
-def to_ticks(items: Iterable[Any], source: str, ts_key: str | None, price_key: str | None) -> tuple[list[Tick], list[Any]]:
+def to_ticks(
+    items: Iterable[Any], source: str, ts_key: str | None, price_key: str | None, decimal_hint: str | None = None
+) -> tuple[list[Tick], list[Any]]:
     """Convierte puntos a ticks; devuelve también los puntos originales que no se pudieron interpretar."""
     items = list(items)
-    parsed = rows_to_ticks(items, default_source=source, ts_key=ts_key, price_key=price_key, allowed_sources={source})
+    parsed = rows_to_ticks(
+        items, default_source=source, ts_key=ts_key, price_key=price_key, allowed_sources={source}, decimal_hint=decimal_hint
+    )
     return parsed.ticks, [items[r["row"] - 1] for r in parsed.rejected]
 
 
@@ -157,8 +161,9 @@ def cmd_csv(a: argparse.Namespace) -> None:
     with open(a.file, encoding="utf-8-sig", newline="") as f:
         sample = f.read(4096)
         f.seek(0)
-        rows = list(csv.DictReader(f, dialect=sniff_dialect(sample)))
-    ticks, bad = to_ticks(rows, a.source, a.ts_key, a.price_key)
+        dialect = sniff_dialect(sample)
+        rows = list(csv.DictReader(f, dialect=dialect))
+    ticks, bad = to_ticks(rows, a.source, a.ts_key, a.price_key, decimal_hint_for(dialect.delimiter))
     if bad:
         print(f"{len(bad)} filas no interpretadas; ejemplo: {bad[0]}")
     save(ticks, a.source, a.dry_run)

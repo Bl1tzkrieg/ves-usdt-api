@@ -20,7 +20,7 @@ from ..db import get_db
 from ..security import require_api_key
 from ..models import HistoryResponse, ImportResult, LatestPoint, SourceInfo
 from ..sources import DEFAULT_SOURCE, REGISTRY
-from ..tick_parsing import PRICE_KEYS, SOURCE_KEYS, TS_KEYS, rows_to_ticks, sniff_dialect
+from ..tick_parsing import PRICE_KEYS, SOURCE_KEYS, TS_KEYS, decimal_hint_for, rows_to_ticks, sniff_dialect
 
 router = APIRouter(prefix="/api/v1/rates", tags=["rates"])
 
@@ -291,7 +291,9 @@ async def import_csv(
 ):
     """CSV con cabecera. Columnas aceptadas (insensible a mayúsculas):
     - `date` (YYYY-MM-DD, ISO 8601, DD/MM/YYYY) **o** `timestamp` (epoch en s o ms)
-    - `price` (o `close`, `rate`, `promedio`); acepta `1.234,56` y `1,5`
+    - `price` (o `close`, `rate`, `promedio`); acepta `1.234,56` y `1,5`. Para valores ambiguos
+      (`1.234`, `36,512`) el delimitador decide el separador decimal: con `;` el decimal es `,`
+      y con `,` es `.` (igual que escribe `history.csv`), así que su propia exportación se reimporta.
     - `source` (opcional si se pasa `?source=`)
     - `buy`, `sell` (opcionales → se guardan en `extra`)
 
@@ -300,7 +302,8 @@ async def import_csv(
     Con `replace=true` cualquier fila rechazada aborta la importación con 422 sin escribir nada.
     """
     content = await _read_csv_text(file)
-    reader = csv.DictReader(io.StringIO(content), dialect=sniff_dialect(content[:2048]))
+    dialect = sniff_dialect(content[:2048])
+    reader = csv.DictReader(io.StringIO(content), dialect=dialect)
     if not reader.fieldnames:
         raise HTTPException(422, "CSV vacío o sin cabecera")
     headers = {c.lower().strip() for c in reader.fieldnames if c}
@@ -312,7 +315,9 @@ async def import_csv(
         raise HTTPException(422, f"Fuente desconocida {source!r}. Disponibles: {sorted(REGISTRY)}")
 
     try:
-        parsed = rows_to_ticks(reader, default_source=source, allowed_sources=REGISTRY)
+        parsed = rows_to_ticks(
+            reader, default_source=source, allowed_sources=REGISTRY, decimal_hint=decimal_hint_for(dialect.delimiter)
+        )
     except csv.Error as e:
         raise HTTPException(422, f"CSV mal formado: {e}") from e
 
