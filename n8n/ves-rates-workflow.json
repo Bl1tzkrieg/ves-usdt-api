@@ -1,0 +1,436 @@
+{
+  "name": "ves-rates: backfill diario y alertas horarias",
+  "active": false,
+  "nodes": [
+    {
+      "id": "a1f0c001-0000-4000-8000-000000000001",
+      "name": "Cada día 06:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "daysInterval": 1,
+              "triggerAtHour": 6,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "a1f0c001-0000-4000-8000-000000000002",
+      "name": "POST /collect",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.RATES_BASE_URL }}/api/v1/rates/collect",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notes": "Empujón a la recolección. Un 409 (recolección en curso) o un fallo no detiene el backfill."
+    },
+    {
+      "id": "a1f0c001-0000-4000-8000-000000000003",
+      "name": "POST /backfill/yadio 7 días",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.RATES_BASE_URL }}/api/v1/rates/backfill/yadio",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "days",
+              "value": "7"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "a1f0c001-0000-4000-8000-000000000004",
+      "name": "Backfill OK",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        720,
+        -100
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "a1f0c001-0000-4000-8000-000000000005",
+      "name": "Mensaje: backfill falló",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        720,
+        100
+      ],
+      "parameters": {
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "b1",
+              "name": "subject",
+              "type": "string",
+              "value": "[ves-rates] El backfill diario de Yadio falló"
+            },
+            {
+              "id": "b2",
+              "name": "message",
+              "type": "string",
+              "value": "=El backfill de Yadio (POST /backfill/yadio?days=7) falló el {{ $now.toFormat('yyyy-MM-dd HH:mm') }} (America/Caracas): {{ typeof $json.error === 'string' ? $json.error : ($json.error?.message ?? JSON.stringify($json.error)) }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "a1f0c001-0000-4000-8000-000000000006",
+      "name": "Cada hora",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        400
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1,
+              "triggerAtMinute": 5
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "a1f0c001-0000-4000-8000-000000000007",
+      "name": "GET /stats",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        240,
+        400
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.RATES_BASE_URL }}/api/v1/rates/stats",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "sources",
+              "value": "binance_p2p,yadio,bcv,paralelo"
+            },
+            {
+              "name": "reference",
+              "value": "bcv"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "a1f0c001-0000-4000-8000-000000000008",
+      "name": "Calcular alertas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        400
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Calcula las alertas de variación 24h a partir de la respuesta de GET /stats.\n// Umbral: RATES_ALERT_PCT (por defecto 3). Un valor vacío, no numérico o <= 0 usa 3.\n// Si la instancia bloquea $env (N8N_BLOCK_ENV_ACCESS_IN_NODE=true) se usan los valores por defecto.\nconst envVar = (name) => {\n  try {\n    return $env[name];\n  } catch (e) {\n    return undefined;\n  }\n};\nconst rawThreshold = Number.parseFloat(envVar('RATES_ALERT_PCT') ?? '');\nconst threshold = Number.isFinite(rawThreshold) && rawThreshold > 0 ? rawThreshold : 3;\n// Enlace de la página: RATES_PUBLIC_URL (la URL que abre una persona) o, si falta, RATES_BASE_URL.\nconst pageUrl = String(envVar('RATES_PUBLIC_URL') || envVar('RATES_BASE_URL') || '').replace(/\\/+$/, '') + '/';\n\n// Día local (America/Caracas, igual que la API) en formato YYYY-MM-DD.\nconst caracasDay = new Intl.DateTimeFormat('en-US', {\n  timeZone: 'America/Caracas', year: 'numeric', month: '2-digit', day: '2-digit',\n});\nconst localDay = (iso) => {\n  const t = Date.parse(iso);\n  if (!Number.isFinite(t)) return String(iso).slice(0, 10);\n  const p = Object.fromEntries(caracasDay.formatToParts(new Date(t)).map((x) => [x.type, x.value]));\n  return p.year + '-' + p.month + '-' + p.day;\n};\n\n// Deduplicación duradera: guarda source|día local|signo ya avisados en los datos estáticos del flujo,\n// así un movimiento sostenido avisa una vez por dirección y por día aunque entren ticks nuevos.\n// n8n solo persiste estos datos en ejecuciones de producción (flujo activo), no en pruebas manuales.\nconst staticData = $getWorkflowStaticData('global');\nconst alerted = staticData.alerted && typeof staticData.alerted === 'object' ? staticData.alerted : {};\nconst KEEP_MS = 7 * 24 * 3600 * 1000;\nconst nowMs = Date.now();\nfor (const [key, at] of Object.entries(alerted)) {\n  if (!(nowMs - Date.parse(at) < KEEP_MS)) delete alerted[key];\n}\n\nconst isNum = (v) => typeof v === 'number' && Number.isFinite(v);\nconst invalid = [];\nconst duplicates = [];\nconst alerts = [];\nconst seenSources = new Set();\nlet checked = 0;\n\n$input.all().forEach((item, index) => {\n  const s = item.json;\n  if (!s || typeof s !== 'object' || Object.keys(s).length === 0) return; // respuesta vacía: nada que revisar\n  const w = s.change && typeof s.change === 'object' ? s.change['24h'] : undefined;\n  if (typeof s.source !== 'string' || !s.source || !isNum(s.latest) || typeof s.latest_date !== 'string' || w === undefined) {\n    invalid.push({ index, reason: 'entrada de /stats sin source, latest, latest_date o change' });\n    return;\n  }\n  checked += 1;\n  if (w === null) return; // sin historia de 24 h\n  if (!isNum(w.pct) || !isNum(w.from_price) || typeof w.from_date !== 'string') {\n    invalid.push({ index, source: s.source, reason: 'change.24h sin pct, from_price o from_date numéricos' });\n    return;\n  }\n  if (Math.abs(w.pct) < threshold) return;\n  const key = s.source + '|' + localDay(s.latest_date) + '|' + (w.pct > 0 ? '+' : '-');\n  if (seenSources.has(s.source) || alerted[key]) {\n    duplicates.push(key);\n    return;\n  }\n  seenSources.add(s.source);\n  alerts.push({\n    key,\n    source: s.source,\n    label: typeof s.label === 'string' && s.label ? s.label : s.source,\n    unit: typeof s.unit === 'string' ? s.unit : '',\n    price: s.latest,\n    latest_date: s.latest_date,\n    pct: w.pct,\n    abs: isNum(w.abs) ? w.abs : s.latest - w.from_price,\n    from_price: w.from_price,\n    from_date: w.from_date,\n  });\n});\n\nif (checked === 0 && invalid.length > 0) {\n  throw new Error('Respuesta de /stats malformada: ' + invalid.length + ' entradas inválidas, ninguna válida');\n}\n\nfor (const a of alerts) alerted[a.key] = new Date(nowMs).toISOString();\nstaticData.alerted = alerted;\nstaticData.statsDown = false;\n\nconst fmt = (n, d) => n.toLocaleString('es-VE', { minimumFractionDigits: d, maximumFractionDigits: d });\nconst lines = alerts.map((a) => {\n  const sign = a.pct > 0 ? '+' : '';\n  return '- ' + a.label + ': ' + fmt(a.price, 2) + ' ' + a.unit + ' (' + sign + fmt(a.pct, 2) + ' % en 24 h; antes ' +\n    fmt(a.from_price, 2) + ' el ' + a.from_date + '; último dato ' + a.latest_date + ')';\n});\nconst subject = '[ves-rates] Variación 24 h >= ' + threshold + ' %: ' + alerts.map((a) => a.source).join(', ');\nconst message = 'Variación fuerte en las tasas VES (umbral ' + threshold + ' %):\\n' + lines.join('\\n') + '\\n\\nVer: ' + pageUrl;\n\nreturn [{ json: { threshold, checked, alerts, duplicates, invalid, subject, message } }];\n"
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "a1f0c001-0000-4000-8000-000000000009",
+      "name": "¿Hay alertas?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        720,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.alerts.length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "a1f0c001-0000-4000-8000-00000000000a",
+      "name": "Sin alertas",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        960,
+        400
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "a1f0c001-0000-4000-8000-00000000000b",
+      "name": "Aviso de fallo de stats (una vez por caída)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        560
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Avisa una sola vez por caída: el aviso se repite solo después de que /stats vuelva a responder bien.\nconst staticData = $getWorkflowStaticData('global');\nif (staticData.statsDown === true) return [];\nstaticData.statsDown = true;\nconst err = $input.first().json.error;\nconst detail = typeof err === 'string' ? err : (err && err.message) || JSON.stringify(err ?? 'error desconocido');\nreturn [{\n  json: {\n    subject: '[ves-rates] Alertas horarias sin datos',\n    message: 'No se pudo leer o interpretar GET /stats: ' + detail +\n      '\\nEste aviso no se repite hasta que /stats vuelva a responder bien.',\n  },\n}];\n"
+      }
+    },
+    {
+      "id": "a1f0c001-0000-4000-8000-00000000000c",
+      "name": "Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1200,
+        150
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $env.RATES_TELEGRAM_CHAT_ID }}",
+        "text": "={{ $json.message }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "a1f0c001-0000-4000-8000-00000000000d",
+      "name": "Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1200,
+        350
+      ],
+      "parameters": {
+        "fromEmail": "={{ $env.RATES_ALERT_EMAIL_FROM }}",
+        "toEmail": "={{ $env.RATES_ALERT_EMAIL_TO }}",
+        "subject": "={{ $json.subject }}",
+        "emailFormat": "text",
+        "text": "={{ $json.message }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Cada día 06:00": {
+      "main": [
+        [
+          {
+            "node": "POST /collect",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST /collect": {
+      "main": [
+        [
+          {
+            "node": "POST /backfill/yadio 7 días",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST /backfill/yadio 7 días": {
+      "main": [
+        [
+          {
+            "node": "Backfill OK",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mensaje: backfill falló",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mensaje: backfill falló": {
+      "main": [
+        [
+          {
+            "node": "Telegram",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cada hora": {
+      "main": [
+        [
+          {
+            "node": "GET /stats",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GET /stats": {
+      "main": [
+        [
+          {
+            "node": "Calcular alertas",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Aviso de fallo de stats (una vez por caída)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calcular alertas": {
+      "main": [
+        [
+          {
+            "node": "¿Hay alertas?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Aviso de fallo de stats (una vez por caída)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Hay alertas?": {
+      "main": [
+        [
+          {
+            "node": "Telegram",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Email",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sin alertas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aviso de fallo de stats (una vez por caída)": {
+      "main": [
+        [
+          {
+            "node": "Telegram",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Caracas"
+  },
+  "pinData": {}
+}

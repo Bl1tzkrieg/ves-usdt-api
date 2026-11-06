@@ -27,6 +27,7 @@ Si no logra interpretar algo, imprime una muestra de la respuesta para ajustar l
 from __future__ import annotations
 
 import argparse
+import asyncio
 import csv
 import json
 import sys
@@ -37,6 +38,7 @@ from typing import Any
 import httpx
 
 from app.aggregation import LOCAL_TZ
+from app.backfill_sources import BackfillError, BackfillResult, fetch_yadio_history, keep_missing_days
 from app.db import Tick, get_db
 from app.sources import REGISTRY
 from app.tick_parsing import decimal_hint_for, find_list, rows_to_ticks, sniff_dialect
@@ -124,26 +126,28 @@ def cmd_yadio(a: argparse.Namespace) -> None:
 
     Respuesta: [{"date": "09/14/2026", "rate": 940.01, "avg24h": ..., "usdbtc": ...}, ...]
     `date` es MM/DD/YYYY y `rate` son VES por 1 USD (mercado libre, base USDT). Un punto por día;
-    se guarda a la medianoche local de ese día.
+    se guarda a la medianoche local de ese día y solo en los días locales que aún no tienen ticks
+    de la fuente (igual que `POST /backfill/yadio`), para no mezclarlo con lo del recolector.
     """
     check_source(a.source)
-    days = min(max(a.days, 1), 365)
     if a.days > 365:
         print("Yadio limita el histórico a 365 días; se piden 365.")
-    data = fetch_json(f"https://api.yadio.io/hist/{days}/{a.currency}", [])
-    if not isinstance(data, list):
-        print(f"Respuesta inesperada: {json.dumps(data, ensure_ascii=False)[:500]}")
+
+    async def run() -> BackfillResult:
+        async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
+            return await fetch_yadio_history(client, a.days, a.currency, source=a.source)
+
+    try:
+        result = asyncio.run(run())
+    except BackfillError as e:
+        print(f"Error: {e}")
         sys.exit(1)
-    ticks, bad = [], []
-    for it in data:
-        try:
-            d = datetime.strptime(it["date"], "%m/%d/%Y").replace(tzinfo=LOCAL_TZ)
-            ticks.append(Tick(source=a.source, ts=int(d.timestamp()), price=float(it["rate"])))
-        except (KeyError, ValueError, TypeError):
-            bad.append(it)
-    if bad:
-        print(f"{len(bad)} puntos no interpretados; ejemplo: {json.dumps(bad[0], ensure_ascii=False)[:300]}")
-    save(ticks, a.source, a.dry_run)
+    if result.skipped:
+        print(f"{result.skipped} puntos no interpretados")
+    gaps = keep_missing_days(get_db(), result.ticks)
+    if gaps.ignored_days:
+        print(f"{gaps.ignored_days} días ya tenían datos de '{a.source}'; no se tocan")
+    save(gaps.ticks, a.source, a.dry_run)
 
 
 def cmd_pydolarve(a: argparse.Namespace) -> None:

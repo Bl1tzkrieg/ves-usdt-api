@@ -35,6 +35,7 @@ class Collector:
         self._stop = asyncio.Event()
         self.last_run: float | None = None
         self.last_status: dict[str, str] = {}
+        self.last_error: str | None = None  # último fallo al escribir en la BD; None tras una escritura buena
         self._lock = asyncio.Lock()
 
     async def collect_once(self) -> list[Tick]:
@@ -62,7 +63,13 @@ class Collector:
                 self.last_status[src.name] = "ok"
                 ticks.append(res)
         if ticks:
-            inserted = await asyncio.to_thread(get_db().insert_ticks, ticks)
+            try:
+                inserted = await asyncio.to_thread(get_db().insert_ticks, ticks)
+            except Exception as e:
+                # Típico tras actualizar la imagen Docker: volumen de root y proceso sin privilegios.
+                self.last_error = f"{type(e).__name__}: {e}"
+                raise
+            self.last_error = None
             log.info("Recolectados %d ticks (%d nuevos)", len(ticks), inserted)
         self.last_run = time.time()
         return ticks
@@ -98,6 +105,7 @@ class Collector:
             "sources": [s.name for s in self.sources],
             "last_run": self.last_run,
             "last_status": self.last_status,
+            "last_error": self.last_error,
         }
 
 

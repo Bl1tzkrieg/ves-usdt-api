@@ -14,6 +14,7 @@ import sqlite3
 import threading
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from datetime import date
 from typing import Any
 
 from .config import settings
@@ -129,6 +130,17 @@ class Database:
                 (source, ts_from, ts_to),
             )
             return [_row_to_tick(r) for r in cur.fetchall()]
+
+    def days_with_ticks(self, source: str, ts_from: int, ts_to: int) -> set[date]:
+        """Días locales (`LOCAL_TZ` de aggregation.py) con algún tick de `source` en [ts_from, ts_to)."""
+        offset = settings.tz_offset_hours * 3600
+        with self._lock:
+            cur = self._conn.execute(
+                """SELECT DISTINCT date(ts + ?, 'unixepoch') FROM ticks
+                   WHERE source = ? AND ts >= ? AND ts < ?""",
+                (offset, source, ts_from, ts_to),
+            )
+            return {date.fromisoformat(r[0]) for r in cur.fetchall()}
 
     def last_before(self, source: str, ts: int) -> Tick | None:
         with self._lock:

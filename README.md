@@ -46,6 +46,19 @@ mkdir -p ./data && sudo chown 10001 ./data
 docker run -p 8000:8000 -v "$PWD/data:/data" ves-rates
 ```
 
+Si actualiza desde una imagen anterior, que corría como root, el volumen `rates-data` y su `rates.db` siguen siendo de root y el nuevo proceso no puede escribir. La app arranca y `/health` responde, pero el recolector no guarda nada. Una sola vez, antes de arrancar la imagen nueva:
+
+```bash
+docker run --rm -u 0 -v rates-data:/data --entrypoint chown ves-rates -R 10001 /data
+```
+
+`/health` y `GET /collector` muestran el último error de escritura en `collector.last_error` (`null` si la última escritura fue bien).
+
+### Notas de despliegue
+
+- Sirva la app en la raíz del dominio (`https://tasas.example.com/`), no bajo un subpath como `/tasas/`. La página pide `/api/...` y `/static/...` con rutas absolutas, y el middleware que protege `/import` compara la ruta exacta. Detrás de un proxy, reenvíe el dominio completo a la app sin reescribir rutas.
+- `/docs` (Swagger) carga sus hojas de estilo y scripts desde cdn.jsdelivr.net, así que el navegador que lo abre necesita salida a internet. La API y la página no dependen de eso.
+
 ## Configuración
 
 Todas las variables llevan el prefijo `RATES_` y se leen del entorno o de `.env`. Las listas van en JSON.
@@ -65,7 +78,7 @@ Todas las variables llevan el prefijo `RATES_` y se leen del entorno o de `.env`
 | `RATES_EXPORT_MAX_CELLS` | `400000` | Tope de celdas de `history.xlsx` (puntos por columnas de hoja). Mínimo 1000 |
 | `RATES_IMPORT_MAX_BYTES` | `10000000` | Tamaño máximo del CSV de `/import` |
 | `RATES_CORS_ORIGINS` | `[]` | Orígenes CORS permitidos. Vacío significa solo mismo origen |
-| `RATES_API_KEY` | vacío | Clave para `POST /import` y `POST /collect`. Vacía, ambos responden 503 |
+| `RATES_API_KEY` | vacío | Clave para `POST /import`, `POST /collect` y `POST /backfill/yadio`. Vacía, los tres responden 503 |
 
 ## Endpoints
 
@@ -169,12 +182,18 @@ curl -o informe.pdf "localhost:8000/api/v1/rates/report.pdf?month=2026-10&source
 
 ### Escritura, con clave
 
-`POST /collect` y `POST /import` exigen la cabecera `X-API-Key` igual a `RATES_API_KEY`. Sin clave configurada responden 503; con una clave ausente o distinta, 401.
+`POST /collect`, `POST /import` y `POST /backfill/yadio` exigen la cabecera `X-API-Key` igual a `RATES_API_KEY`. Sin clave configurada responden 503; con una clave ausente o distinta, 401.
 
 `POST /collect` consulta todas las fuentes ahora. Si ya hay una recolección en curso responde 409. Si la última terminó hace menos de 30 segundos no consulta nada y devuelve `"skipped": true`, lo que impide usar el endpoint para martillar las APIs externas. La respuesta trae `skipped`, `collected` con lo obtenido y `status` por fuente.
 
 ```bash
 curl -X POST -H "X-API-Key: $RATES_API_KEY" localhost:8000/api/v1/rates/collect
+```
+
+`POST /backfill/yadio?days=365` pide a Yadio un punto por día (`days` se recorta a 1..365) y lo guarda a la medianoche local, pero solo en los días que no tienen ningún tick de `yadio`. Los días que el recolector ya cubrió no se tocan: un punto diario extra se mezclaría con sus velas y movería apertura, mínimo y máximo. Repetirlo es inocuo. Está pensado para planificadores como n8n que mantienen el histórico al día sin acceso al disco. No lleva cuerpo. Responde `{"received": n, "inserted": m, "skipped": k, "ignored_days": d}`, donde `received` cuenta los puntos válidos recibidos de Yadio, `inserted` los que se guardaron, `skipped` los que no se pudieron interpretar e `ignored_days` los días que ya tenían datos. El modo `yadio` de `scripts/backfill.py` aplica la misma regla. La consulta a Yadio usa `RATES_HTTP_TIMEOUT_SECONDS`. Si Yadio falla o responde algo inesperado, 502 con un detalle corto.
+
+```bash
+curl -X POST -H "X-API-Key: $RATES_API_KEY" "localhost:8000/api/v1/rates/backfill/yadio?days=365"
 ```
 
 `POST /import` recibe un CSV en el campo multipart `file`, con cabecera, en UTF-8. Parámetros: `source` fija la fuente cuando el CSV no trae columna `source`; `replace=true` borra antes, por cada fuente, los ticks entre la primera y la última fecha del archivo.
@@ -213,7 +232,7 @@ Antes de leer el cuerpo, un middleware valida la clave y el tamaño. Exige `Cont
 `scripts/backfill.py` escribe directo en `RATES_DB_PATH`, sin pasar por la API. Todos los modos que importan aceptan `--source` (obligatorio) y `--dry-run`. `--ts-key` y `--price-key` solo se aplican a los modos `json` y `csv`; `yadio` y `pydolarve` los ignoran.
 
 ```bash
-# Yadio, USDT/VES, un punto diario, hasta 365 días
+# Yadio, USDT/VES, un punto diario, hasta 365 días; solo en días sin datos de la fuente
 python -m scripts.backfill yadio --source yadio --days 365
 
 # Cualquier URL que devuelva JSON con una lista de puntos
@@ -228,6 +247,8 @@ python -m scripts.backfill csv --source bcv --file bcv_2025.csv
 # Ver qué devuelve una URL antes de importar
 python -m scripts.backfill peek --url "https://..."
 ```
+
+Cada consulta HTTP del script tiene un timeout fijo de 60 segundos, más holgado que el de la API (`RATES_HTTP_TIMEOUT_SECONDS`), porque las respuestas históricas son grandes.
 
 En el modo `json` el script detecta por su cuenta dónde está la lista de puntos, sea una lista de pares `[ts, precio]`, una lista de objetos o un objeto que la contiene. Si no logra interpretar los puntos, imprime uno de ejemplo para que indique `--ts-key` y `--price-key`. `json` y `peek` aceptan `--header "Authorization: Bearer XXX"`, repetible.
 
@@ -260,6 +281,10 @@ Las cotas impiden que una sola petición tumbe el servicio. Sin ellas, `start=0&
 
 La clave de API protege las escrituras porque un POST multipart es una "simple request" para el navegador: sin clave, cualquier página abierta en la misma red podría mandar `replace=true` y borrar el histórico.
 
+## Automatización con n8n
+
+`n8n/ves-rates-workflow.json` es un flujo de n8n 1.x, importado inactivo, que cada día a las 06:00 (America/Caracas) llama a `POST /collect` y `POST /backfill/yadio?days=7`, y cada hora lee `GET /stats` y avisa por Telegram y correo cuando una fuente varía en 24 h al menos `RATES_ALERT_PCT` % (3 por defecto). La clave va en una credencial de n8n, nunca en el JSON. Importación, variables, credenciales, activación y plan de prueba en [`n8n/README.md`](n8n/README.md).
+
 ## Desarrollo
 
 ```bash
@@ -281,8 +306,10 @@ Si tenía un cliente contra la versión inicial, esto rompe:
 - `RATES_CORS_ORIGINS` era `["*"]` y ahora es `[]`. Un front en otro origen tiene que listarse.
 - La CSP bloquea scripts inline. Si modificó `index.html` con JavaScript propio, muévalo a `static/app.js`.
 - `seed_demo` se niega a escribir sobre una base con datos sin `--force`.
-- El contenedor ya no corre como root; ver la nota de Docker sobre carpetas del host.
-
-## Lo que viene
-
-Está planificado, todavía no existe: un flujo de n8n que dispare recolecciones y backfill diarios y avise por variaciones fuertes (fase E). El detalle está en `docs/superpowers/plans/2026-11-06-hardening-quality-ui-exports-n8n.md`.
+- El contenedor ya no corre como root; ver la nota de Docker sobre carpetas del host. Un volumen creado con la imagen anterior pertenece a root: ejecute una vez `docker run --rm -u 0 -v rates-data:/data --entrypoint chown ves-rates -R 10001 /data` o el recolector no podrá escribir (lo verá en `collector.last_error` de `/health`).
+- `POST /backfill/yadio` y `scripts/backfill.py yadio` solo rellenan días locales sin datos de la fuente y la respuesta del endpoint suma `ignored_days`.
+- `filename` de `history.csv` se sanea a `A-Za-z0-9._-` y se le agrega `.csv` si no lo trae. Un nombre con otros caracteres ya no se respeta tal cual.
+- `max_points=0` ya no significa "todos los puntos": usa `RATES_RAW_MAX_POINTS` (20 000 por defecto) y ningún valor supera ese tope.
+- `RATES_RAW_MAX_POINTS=0` y `RATES_COLLECTOR_INTERVAL_SECONDS` menor que 30 hacen fallar el arranque en vez de aceptarse.
+- `POST /collect` agrega `skipped` a la respuesta y puede responder 409 si ya hay una recolección en curso.
+- Un `.env` viejo con `RATES_CORS_ORIGINS=["*"]` sigue dejando CORS abierto a cualquier origen, porque el valor explícito gana sobre el nuevo defecto. Revíselo.

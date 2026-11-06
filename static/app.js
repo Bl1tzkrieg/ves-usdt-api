@@ -564,7 +564,7 @@ function renderHero(error = null) {
     : '';
 }
 
-// --- Exportaciones. XLSX y PDF se activan solos cuando el servidor los sirve (ver enablePendingExports).
+// --- Exportaciones: CSV, XLSX y PDF. `exportBlocker` las frena mientras la consulta no es válida.
 const xlsxUrl = () => `${API}/history.xlsx?${params({ layout: 'wide', value: $('value').value })}`;
 const todayLocal = () => new Date().toLocaleDateString('en-CA', { timeZone: TZ });
 function pdfUrl() {
@@ -574,24 +574,8 @@ function pdfUrl() {
   return `${API}/report.pdf?${new URLSearchParams({ month: ref.slice(0, 7), sources: state.sources.join(',') })}`;
 }
 
-const PENDING_EXPORTS = { xlsx: `${API}/history.xlsx`, pdf: `${API}/report.pdf` };
-
-// Una sola lectura del esquema OpenAPI: sin peticiones a rutas que aún no existen ni efectos secundarios
-async function enablePendingExports() {
-  let paths;
-  try { paths = (await getJson('/openapi.json')).paths || {}; } catch (_) { return; } // quedan deshabilitados
-  for (const [id, path] of Object.entries(PENDING_EXPORTS)) {
-    if (!(path in paths)) continue;
-    const button = $(id);
-    button.removeAttribute('aria-disabled');
-    button.removeAttribute('title');
-    button.dataset.pending = 'false';
-  }
-}
-
 function onExport(button, urlFn) {
   button.addEventListener('click', () => {
-    if (button.getAttribute('aria-disabled') === 'true') return;
     if (!state.sources.length) { setStatus('Marca al menos una fuente'); return; }
     if (exportBlocker) { setStatus(exportBlocker); return; }
     location.href = urlFn();
@@ -654,7 +638,7 @@ async function init() {
   wireControls();
   buildCharts();
   try { await loadCatalog(); } catch (e) { setStatus(e.message); return; }
-  await Promise.all([loadTiles(), load(), enablePendingExports()]);
+  await Promise.all([loadTiles(), load()]);
   document.documentElement.dataset.settled = 'true'; // primera carga completa (lo espera scripts/screenshot.py)
   connectLive();
 }

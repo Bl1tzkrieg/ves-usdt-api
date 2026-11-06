@@ -46,3 +46,29 @@ def test_failing_source_does_not_block_the_others(mem_db):
     assert c.last_status["ok_src"] == "ok"
     assert c.last_status["boom_src"].startswith("error:") and "fuente caída" in c.last_status["boom_src"]
     assert c.last_run is not None
+
+
+def test_write_error_is_exposed_in_status_and_cleared_on_success(mem_db, monkeypatch):
+    c = Collector(sources=[])
+    c.sources = [_Ok()]
+
+    def broken(ticks):
+        raise PermissionError("attempt to write a readonly database")
+
+    monkeypatch.setattr(mem_db, "insert_ticks", broken)
+    with pytest.raises(PermissionError):
+        asyncio.run(c.collect_once())
+    assert "readonly database" in c.status()["last_error"]
+
+    monkeypatch.undo()
+    dbmod.set_db(mem_db)
+    c.last_run = None
+    asyncio.run(c.collect_once())
+    assert c.status()["last_error"] is None
+
+
+def test_health_exposes_collector_last_error(client, monkeypatch):
+    from app.collector import collector
+
+    monkeypatch.setattr(collector, "last_error", "attempt to write a readonly database")
+    assert client.get("/health").json()["collector"]["last_error"] == "attempt to write a readonly database"

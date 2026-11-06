@@ -62,3 +62,24 @@ def test_replace_ticks_is_atomic():
         db.replace_ticks(bad)
     db._conn = real
     assert [(t.ts, t.price) for t in db.raw("bcv", 0, 10**9)] == [(100, 1.0), (200, 2.0)]
+
+
+def test_days_with_ticks_cuts_days_in_local_time():
+    from datetime import date, datetime
+
+    from app.aggregation import LOCAL_TZ
+
+    def ts(d: int, hh: int, mm: int = 0) -> int:
+        return int(datetime(2025, 1, d, hh, mm, tzinfo=LOCAL_TZ).timestamp())
+
+    db = Database(":memory:")
+    db.insert_ticks(
+        [
+            Tick("yadio", ts(1, 0), 1.0),
+            Tick("yadio", ts(2, 23, 30), 1.0),  # 3 de enero en UTC, 2 en hora local
+            Tick("yadio", ts(9, 12), 1.0),  # fuera del rango
+            Tick("bcv", ts(5, 12), 1.0),  # otra fuente
+        ]
+    )
+    assert db.days_with_ticks("yadio", ts(1, 0), ts(8, 0)) == {date(2025, 1, 1), date(2025, 1, 2)}
+    assert db.days_with_ticks("yadio", ts(3, 0), ts(8, 0)) == set()
