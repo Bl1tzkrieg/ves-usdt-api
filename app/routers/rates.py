@@ -6,7 +6,6 @@ import csv
 import io
 import json
 import re
-from datetime import date, datetime, timedelta
 from typing import AsyncIterator, Iterator
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile
@@ -16,9 +15,10 @@ from .. import aggregation as agg
 from ..aggregation import Candle, Fill, Interval, Value
 from ..collector import CollectInProgress, collector
 from ..config import settings
-from ..db import MAX_TS, get_db
+from ..db import get_db
 from ..security import require_api_key
 from ..models import HistoryResponse, ImportResult, LatestPoint, SourceInfo
+from ..series import build_series, resolve_range
 from ..sources import DEFAULT_SOURCE, REGISTRY
 from ..tick_parsing import PRICE_KEYS, SOURCE_KEYS, TS_KEYS, decimal_hint_for, rows_to_ticks, sniff_dialect
 
@@ -31,84 +31,12 @@ _READ_CHUNK = 1 << 20  # 1 MiB
 
 # ------------------------------------------------------------------ helpers de parámetros
 
-def _parse_when(raw: str | None, *, end: bool) -> int | None:
-    """Acepta 'YYYY-MM-DD', ISO 8601 con hora, o epoch en segundos.
-
-    Una fecha sin hora se interpreta en hora local; para `end` es inclusiva (hasta fin del día).
-    Fuera de (0, MAX_TS) responde 422.
-    """
-    if raw is None or raw == "":
-        return None
-    out_of_range = HTTPException(422, f"Fecha fuera de rango: {raw!r}. Debe estar entre 1970 y 2100.")
-    try:
-        ts = _parse_when_unchecked(raw, end=end)
-    except OverflowError as e:
-        raise out_of_range from e
-    if not 0 < ts < MAX_TS:
-        raise out_of_range
-    return ts
-
-
-def _parse_when_unchecked(raw: str, *, end: bool) -> int:
-    if raw.isascii() and raw.isdigit():
-        return int(raw)
-    try:
-        d = date.fromisoformat(raw)
-        if end:
-            d = d + timedelta(days=1)
-        return agg.local_midnight(d)
-    except ValueError:
-        pass
-    try:
-        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
-    except ValueError as e:
-        raise HTTPException(422, f"Fecha inválida: {raw!r}. Use YYYY-MM-DD, ISO 8601 o epoch.") from e
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=agg.LOCAL_TZ)
-    return int(dt.timestamp())
-
-
-def _resolve_range(start: str | None, end: str | None, days: int | None) -> tuple[int, int]:
-    ts_end = _parse_when(end, end=True) or int(datetime.now().timestamp())
-    ts_start = _parse_when(start, end=False)
-    if ts_start is None:
-        ts_start = ts_end - (days or 30) * 86400
-    if ts_start >= ts_end:
-        raise HTTPException(422, "`start` debe ser anterior a `end`.")
-    if ts_end - ts_start > settings.max_range_days * 86400:
-        raise HTTPException(422, f"El rango máximo es de {settings.max_range_days} días.")
-    return ts_start, ts_end
-
-
 def _resolve_sources(raw: str | None) -> list[str]:
     names = [s.strip() for s in (raw or DEFAULT_SOURCE).split(",") if s.strip()]
     unknown = [n for n in names if n not in REGISTRY]
     if unknown:
         raise HTTPException(422, f"Fuente(s) desconocida(s): {unknown}. Disponibles: {sorted(REGISTRY)}")
     return names
-
-
-def _build_series(source: str, ts_from: int, ts_to: int, interval: Interval, fill: Fill, max_points: int) -> list:
-    db = get_db()
-    if interval is Interval.raw:
-        cap = min(max_points or settings.raw_max_points, settings.raw_max_points)
-        ticks = agg.downsample(db.raw(source, ts_from, ts_to), cap)
-        return [
-            {"t": t.ts, "date": agg.local_iso(t.ts), "price": t.price, "extra": t.extra} for t in ticks
-        ]
-    bucket = 3600 if interval is Interval.hour else 86400
-    if fill is not Fill.none and (ts_to - ts_from) // bucket > settings.max_fill_buckets:
-        raise HTTPException(
-            422, f"Rango demasiado grande para `fill={fill.value}`: máximo {settings.max_fill_buckets} cubetas."
-        )
-    candles = agg.candles_from_buckets(db.buckets(source, ts_from, ts_to, bucket, agg.OFFSET_SECONDS))
-    candles = agg.rollup(candles, interval) if interval in (Interval.week, Interval.month) else candles
-    seed = None
-    if fill is Fill.forward:
-        prev = db.last_before(source, ts_from)
-        seed = prev.price if prev else None
-    candles = agg.fill_gaps(candles, interval, ts_from, ts_to, fill, seed=seed)
-    return [c.to_dict() for c in candles]
 
 
 # ------------------------------------------------------------------ endpoints
@@ -154,11 +82,11 @@ async def history(
     fill: Fill = Query(Fill.none, description="Relleno de cubetas vacías: none | forward | null"),
     max_points: int = Query(0, ge=0, description="Solo interval=raw: reduce a ~N puntos (0 = el tope del servidor, `raw_max_points`)"),
 ):
-    ts_from, ts_to = _resolve_range(start, end, days)
+    ts_from, ts_to = resolve_range(start, end, days)
     names = _resolve_sources(sources)
     series = []
     for name in names:
-        points = await asyncio.to_thread(_build_series, name, ts_from, ts_to, interval, fill, max_points)
+        points = await asyncio.to_thread(build_series, name, ts_from, ts_to, interval, fill, max_points)
         src = REGISTRY[name]
         series.append({"source": name, "label": src.label, "unit": src.unit, "points": points})
     return {
@@ -189,10 +117,10 @@ async def history_csv(
     dec = decimal or ("," if sep == ";" else ".")
     if dec == sep:
         raise HTTPException(422, "`decimal` no puede ser igual a `sep`.")
-    ts_from, ts_to = _resolve_range(start, end, days)
+    ts_from, ts_to = resolve_range(start, end, days)
     names = _resolve_sources(sources)
     data = {
-        n: await asyncio.to_thread(_build_series, n, ts_from, ts_to, interval, fill, max_points) for n in names
+        n: await asyncio.to_thread(build_series, n, ts_from, ts_to, interval, fill, max_points) for n in names
     }
 
     def _date(iso: str) -> str:
