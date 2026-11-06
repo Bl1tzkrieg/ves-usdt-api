@@ -566,9 +566,12 @@ function renderHero(error = null) {
 
 // --- Exportaciones. XLSX y PDF se activan solos cuando el servidor los sirve (ver enablePendingExports).
 const xlsxUrl = () => `${API}/history.xlsx?${params({ layout: 'wide', value: $('value').value })}`;
+const todayLocal = () => new Date().toLocaleDateString('en-CA', { timeZone: TZ });
 function pdfUrl() {
-  const ref = $('end').value || new Date().toLocaleDateString('en-CA', { timeZone: TZ });
-  return `${API}/report.pdf?month=${ref.slice(0, 7)}`;
+  const today = todayLocal();
+  let ref = $('end').value || today;
+  if (ref > today) ref = today; // el informe no admite meses futuros
+  return `${API}/report.pdf?${new URLSearchParams({ month: ref.slice(0, 7), sources: state.sources.join(',') })}`;
 }
 
 const PENDING_EXPORTS = { xlsx: `${API}/history.xlsx`, pdf: `${API}/report.pdf` };
@@ -647,6 +650,7 @@ function wireControls() {
 }
 
 async function init() {
+  $('end').max = todayLocal();
   wireControls();
   buildCharts();
   try { await loadCatalog(); } catch (e) { setStatus(e.message); return; }
