@@ -1,11 +1,12 @@
 [tool.ruff]
 line-length = 110
 target-version = "py311"
+extend-exclude = ["docs"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
 ignore = [
-    "UP042",  # los Enum (str, Enum) conservan str()/format() de valor; StrEnum los cambiaría
+    "UP042",  # StrEnum cambiaría str()/format() al valor; el código usa .value explícito, así que se mantiene (str, Enum)
 ]
 
 [tool.ruff.lint.flake8-bugbear]

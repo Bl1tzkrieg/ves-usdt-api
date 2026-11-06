@@ -18,7 +18,7 @@ def resolve_sources(raw: str | None) -> list[str]:
     unknown = [n for n in names if n not in REGISTRY]
     if unknown:
         raise InvalidQuery(f"Fuente(s) desconocida(s): {unknown}. Disponibles: {sorted(REGISTRY)}")
-    return names
+    return list(dict.fromkeys(names))  # sin repetidos, conservando el orden
 
 
 def resolve_sources_or_all(raw: str | None) -> list[str]:

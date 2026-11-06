@@ -342,3 +342,15 @@ def test_stream_first_event_has_latest_rates(client):
     payload = json.loads(data[len("data: ") :])
     assert [p["source"] for p in payload] == ["binance_p2p"]
     assert payload[0]["price"] == pytest.approx(109.20)
+
+
+def test_repeated_sources_are_deduplicated(client):
+    r = client.get(
+        "/api/v1/rates/history", params={"start": "2025-01-01", "end": "2025-01-02", "sources": "bcv,bcv"}
+    )
+    assert r.status_code == 200 and [s["source"] for s in r.json()["series"]] == ["bcv"]
+    r = client.get(
+        "/api/v1/rates/history.csv",
+        params={"start": "2025-01-01", "end": "2025-01-02", "sources": "bcv,bcv", "layout": "wide"},
+    )
+    assert r.text.splitlines()[0] == "date,timestamp,bcv"

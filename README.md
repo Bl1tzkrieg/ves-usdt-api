@@ -147,7 +147,7 @@ Columnas reconocidas, sin distinguir mayúsculas:
 
 Las fechas pueden ser epoch en segundos o milisegundos, ISO 8601, `YYYY-MM-DD`, `YYYYMMDD`, `DD-MM-YYYY` o `DD/MM/YYYY`. Sin zona horaria se toman en hora local. `MM/DD/YYYY` no se acepta porque choca con `DD/MM`. Un epoch numérico anterior a 2000 se rechaza: casi siempre es un serial de Excel mal leído, no una fecha.
 
-Los precios aceptan `1.234,56`, `1,234.56`, `1,5` y prefijos `Bs.` o `VES`. Con los dos separadores presentes, el último es el decimal. Con uno solo, un valor como `1.234` o `36,512` es ambiguo, y ahí decide el delimitador del CSV: con `;` el decimal es `,`, con `,` o tabulador el decimal es `.`. Así es como escribe `history.csv`, de modo que sus propias exportaciones se reimportan sin tocarlas. Un valor que no encaja con esa regla, como `1.234.567` en un CSV separado por comas, se rechaza en vez de adivinar. Precios cero, negativos o no finitos también se rechazan.
+Los precios aceptan `1.234,56`, `1,234.56`, `1,5` y prefijos `Bs.` o `VES`. Con los dos separadores presentes, el último es el decimal. Con uno solo, un valor como `1.234` o `36,512` es ambiguo, y ahí decide el delimitador del CSV: con `;` el decimal es `,`, con `,` o tabulador el decimal es `.`. Así es como escribe `history.csv`, de modo que sus propias exportaciones se reimportan sin tocarlas. Una exportación con un `decimal=` distinto del predeterminado no hace ese viaje de ida y vuelta. Un valor que no encaja con esa regla, como `1.234.567` en un CSV separado por comas, se rechaza en vez de adivinar. Precios cero, negativos o no finitos también se rechazan.
 
 Una fila mala no aborta la importación. La respuesta es:
 
@@ -164,7 +164,7 @@ Antes de leer el cuerpo, un middleware valida la clave y el tamaño. Exige `Cont
 
 ## Cargar histórico
 
-`scripts/backfill.py` escribe directo en `RATES_DB_PATH`, sin pasar por la API. Todos los modos que importan aceptan `--source` (obligatorio), `--ts-key`, `--price-key` y `--dry-run`.
+`scripts/backfill.py` escribe directo en `RATES_DB_PATH`, sin pasar por la API. Todos los modos que importan aceptan `--source` (obligatorio) y `--dry-run`. `--ts-key` y `--price-key` solo se aplican a los modos `json` y `csv`; `yadio` y `pydolarve` los ignoran.
 
 ```bash
 # Yadio, USDT/VES, un punto diario, hasta 365 días

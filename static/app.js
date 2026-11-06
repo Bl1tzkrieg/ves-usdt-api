@@ -1,10 +1,18 @@
 const API = '/api/v1/rates';
-const ALL_TIME_START = '2000-01-01';
+const ALL_TIME_DAYS = 7300; // = max_range_days del servidor
 const state = { days: 30, sources: ['binance_p2p', 'bcv'], catalog: [] };
 const $ = (id) => document.getElementById(id);
 async function getJson(url) {
   const res = await fetch(url);
-  if (!res.ok) throw new Error(`Error ${res.status}`);
+  if (!res.ok) {
+    let detail = `Error ${res.status}`;
+    try {
+      const body = await res.json();
+      if (typeof body.detail === 'string') detail = body.detail;
+      else if (body.detail) detail = JSON.stringify(body.detail);
+    } catch (_) { /* cuerpo no JSON */ }
+    throw new Error(detail);
+  }
   return res.json();
 }
 // Valor a graficar de un punto: precio en raw, el campo elegido (open/close/avg...) en velas
@@ -43,7 +51,7 @@ function ensureChart() {
 function params(extra = {}) {
   const p = new URLSearchParams();
   const start = $('start').value, end = $('end').value;
-  if (start) p.set('start', start); else if (state.days > 0) p.set('days', state.days); else p.set('start', ALL_TIME_START);
+  if (start) p.set('start', start); else p.set('days', state.days > 0 ? state.days : ALL_TIME_DAYS);
   if (end) p.set('end', end);
   p.set('interval', $('interval').value);
   p.set('fill', $('fill').value);
