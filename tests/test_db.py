@@ -30,7 +30,7 @@ def test_replace_ticks_replaces_range_per_source():
     assert [t.ts for t in db.raw("yadio", 0, 10**9)] == [150]
 
 
-def test_replace_ticks_is_atomic(monkeypatch):
+def test_replace_ticks_is_atomic():
     db = Database(":memory:")
     db.insert_ticks([Tick("bcv", 100, 1.0), Tick("bcv", 200, 2.0)])
     bad = [Tick("bcv", 100, 3.0), Tick("bcv", 200, 4.0)]  # el DELETE cubre las filas existentes

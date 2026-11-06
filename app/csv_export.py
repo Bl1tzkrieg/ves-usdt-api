@@ -5,12 +5,14 @@ import csv
 import io
 import re
 from collections.abc import Iterable, Iterator, Mapping, Sequence
-from typing import Any
+from typing import Any, Literal
 
 from . import aggregation as agg
 from .aggregation import CandleField, Interval
 
 Series = Mapping[str, Sequence[dict[str, Any]]]  # fuente -> puntos (salida de `series.build_series`)
+
+Layout = Literal["long", "wide"]
 
 FILENAME_MAX_LEN = 120
 
@@ -58,7 +60,7 @@ def wide_rows(data: Series, interval: Interval, field: CandleField, decimal_sep:
                *(format_number(by_t[n][t][field.value], decimal_sep) if t in by_t[n] else "" for n in names)]
 
 
-def csv_rows(data: Series, interval: Interval, layout: str, field: CandleField, decimal_sep: str) -> Iterator[list]:
+def csv_rows(data: Series, interval: Interval, layout: Layout, field: CandleField, decimal_sep: str) -> Iterator[list]:
     """Filas (cabecera incluida) según el intervalo y el `layout` (long | wide)."""
     if interval is Interval.raw:
         return raw_rows(data, decimal_sep)

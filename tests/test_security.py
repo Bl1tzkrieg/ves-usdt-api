@@ -80,9 +80,10 @@ def test_security_headers(client):
     )
 
 
-def test_cors_default_is_closed():
+def test_cors_default_is_closed(monkeypatch):
     from app.config import Settings
 
+    monkeypatch.delenv("RATES_CORS_ORIGINS", raising=False)
     assert Settings(_env_file=None).cors_origins == []
 
 

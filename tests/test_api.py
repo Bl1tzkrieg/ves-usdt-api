@@ -16,7 +16,7 @@ from app.sources.dolarapi import BCVSource
 from app.sources.yadio import YadioSource
 
 DAY = 86400
-T0 = 1_735_707_600  # 2025-01-01 00:00 -04:00
+T0 = 1_735_704_000  # 2025-01-01 00:00 -04:00
 
 
 @pytest.fixture()
@@ -243,3 +243,43 @@ def test_history_csv_round_trip_with_replace(client, sep):
     closes = [p["close"] for p in after["series"][0]["points"]]
     assert closes == [p["close"] for p in before["series"][0]["points"]]
     assert closes == pytest.approx([36.512, 37.512, 38.512, 39.512, 40.512, 1234.125])
+
+
+def test_latest_and_sources(client):
+    latest = client.get("/api/v1/rates/latest").json()
+    assert {p["source"] for p in latest} == {"binance_p2p", "bcv"}
+    binance = next(p for p in latest if p["source"] == "binance_p2p")
+    assert binance["price"] == pytest.approx(109.20)  # día 9, 20:00
+    sources = client.get("/api/v1/rates/sources").json()
+    by_name = {s["name"]: s for s in sources}
+    assert {"binance_p2p", "bcv"} <= set(by_name)
+    assert by_name["binance_p2p"]["label"]
+
+
+def test_stream_unknown_source_422(client):
+    assert client.get("/api/v1/rates/stream", params={"sources": "nope"}).status_code == 422
+
+
+def test_stream_first_event_has_latest_rates(client):
+    """Se consume el generador directamente: TestClient no puede cerrar un stream infinito."""
+    from app.routers.stream import stream
+
+    class _Connected:
+        async def is_disconnected(self) -> bool:
+            return False
+
+    async def first_chunk() -> str:
+        resp = await stream(_Connected(), sources="binance_p2p", every=2)
+        assert resp.media_type == "text/event-stream"
+        gen = resp.body_iterator
+        try:
+            return await anext(gen)
+        finally:
+            await gen.aclose()
+
+    chunk = asyncio.run(first_chunk())
+    head, data = chunk.rstrip("\n").split("\n", 1)
+    assert head == "event: rates"
+    payload = json.loads(data[len("data: "):])
+    assert [p["source"] for p in payload] == ["binance_p2p"]
+    assert payload[0]["price"] == pytest.approx(109.20)
