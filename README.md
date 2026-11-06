@@ -54,6 +54,11 @@ docker run --rm -u 0 -v rates-data:/data --entrypoint chown ves-rates -R 10001 /
 
 `/health` y `GET /collector` muestran el último error de escritura en `collector.last_error` (`null` si la última escritura fue bien).
 
+### Notas de despliegue
+
+- Sirva la app en la raíz del dominio (`https://tasas.example.com/`), no bajo un subpath como `/tasas/`. La página pide `/api/...` y `/static/...` con rutas absolutas, y el middleware que protege `/import` compara la ruta exacta. Detrás de un proxy, reenvíe el dominio completo a la app sin reescribir rutas.
+- `/docs` (Swagger) carga sus hojas de estilo y scripts desde cdn.jsdelivr.net, así que el navegador que lo abre necesita salida a internet. La API y la página no dependen de eso.
+
 ## Configuración
 
 Todas las variables llevan el prefijo `RATES_` y se leen del entorno o de `.env`. Las listas van en JSON.
@@ -276,6 +281,10 @@ Las cotas impiden que una sola petición tumbe el servicio. Sin ellas, `start=0&
 
 La clave de API protege las escrituras porque un POST multipart es una "simple request" para el navegador: sin clave, cualquier página abierta en la misma red podría mandar `replace=true` y borrar el histórico.
 
+## Automatización con n8n
+
+`n8n/ves-rates-workflow.json` es un flujo de n8n 1.x, importado inactivo, que cada día a las 06:00 (America/Caracas) llama a `POST /collect` y `POST /backfill/yadio?days=7`, y cada hora lee `GET /stats` y avisa por Telegram y correo cuando una fuente varía en 24 h al menos `RATES_ALERT_PCT` % (3 por defecto). La clave va en una credencial de n8n, nunca en el JSON. Importación, variables, credenciales, activación y plan de prueba en [`n8n/README.md`](n8n/README.md).
+
 ## Desarrollo
 
 ```bash
@@ -299,7 +308,8 @@ Si tenía un cliente contra la versión inicial, esto rompe:
 - `seed_demo` se niega a escribir sobre una base con datos sin `--force`.
 - El contenedor ya no corre como root; ver la nota de Docker sobre carpetas del host. Un volumen creado con la imagen anterior pertenece a root: ejecute una vez `docker run --rm -u 0 -v rates-data:/data --entrypoint chown ves-rates -R 10001 /data` o el recolector no podrá escribir (lo verá en `collector.last_error` de `/health`).
 - `POST /backfill/yadio` y `scripts/backfill.py yadio` solo rellenan días locales sin datos de la fuente y la respuesta del endpoint suma `ignored_days`.
-
-## Automatización con n8n
-
-`n8n/ves-rates-workflow.json` es un flujo de n8n 1.x, importado inactivo, que cada día a las 06:00 (America/Caracas) llama a `POST /collect` y `POST /backfill/yadio?days=7`, y cada hora lee `GET /stats` y avisa por Telegram y correo cuando una fuente varía en 24 h al menos `RATES_ALERT_PCT` % (3 por defecto). La clave va en una credencial de n8n, nunca en el JSON. Importación, variables, credenciales, activación y plan de prueba en [`n8n/README.md`](n8n/README.md).
+- `filename` de `history.csv` se sanea a `A-Za-z0-9._-` y se le agrega `.csv` si no lo trae. Un nombre con otros caracteres ya no se respeta tal cual.
+- `max_points=0` ya no significa "todos los puntos": usa `RATES_RAW_MAX_POINTS` (20 000 por defecto) y ningún valor supera ese tope.
+- `RATES_RAW_MAX_POINTS=0` y `RATES_COLLECTOR_INTERVAL_SECONDS` menor que 30 hacen fallar el arranque en vez de aceptarse.
+- `POST /collect` agrega `skipped` a la respuesta y puede responder 409 si ya hay una recolección en curso.
+- Un `.env` viejo con `RATES_CORS_ORIGINS=["*"]` sigue dejando CORS abierto a cualquier origen, porque el valor explícito gana sobre el nuevo defecto. Revíselo.

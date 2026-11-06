@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     # Orígenes CORS permitidos (lista JSON). Vacío = sin CORS (solo mismo origen).
     cors_origins: list[str] = Field(default_factory=list)
 
-    # Clave para los endpoints de escritura (/import, /collect). Vacía = se rechazan con 503.
+    # Clave para los endpoints de escritura (/import, /collect, /backfill/yadio). Vacía = se rechazan con 503.
     api_key: str = ""
 
 
