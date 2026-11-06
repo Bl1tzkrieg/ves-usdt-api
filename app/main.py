@@ -18,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from .collector import collector
 from .config import settings
 from .db import get_db
-from .routers import admin, rates, stream
+from .routers import admin, history, stream
 from .security import ImportGuardMiddleware, SecurityHeadersMiddleware
 from .series import InvalidQuery
 
@@ -57,7 +57,7 @@ app.add_middleware(
         p for p in (app.docs_url, app.redoc_url, app.swagger_ui_oauth2_redirect_url, app.openapi_url) if p
     },
 )
-app.include_router(rates.router)
+app.include_router(history.router)
 app.include_router(stream.router)
 app.include_router(admin.router)
 
