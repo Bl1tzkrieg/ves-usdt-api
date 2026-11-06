@@ -208,9 +208,11 @@ def downsample(ticks: list[Tick], max_points: int) -> list[Tick]:
     """Reduce una serie raw a ~max_points conservando el primero y el último (para gráficas)."""
     if max_points <= 0 or len(ticks) <= max_points:
         return ticks
-    step = len(ticks) / max_points
-    idx = sorted({int(i * step) for i in range(max_points)} | {len(ticks) - 1})
-    return [ticks[i] for i in idx]
+    if max_points == 1:
+        return [ticks[-1]]
+    # max_points índices equidistantes de 0 a len-1 (ambos incluidos); distintos porque el paso es > 1
+    step = (len(ticks) - 1) / (max_points - 1)
+    return [ticks[round(i * step)] for i in range(max_points - 1)] + [ticks[-1]]
 
 
 def pick(candle: Candle, value: Value) -> float | None:

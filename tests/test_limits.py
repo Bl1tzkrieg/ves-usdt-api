@@ -64,11 +64,44 @@ def test_raw_capped_by_raw_max_points(client, monkeypatch):
     monkeypatch.setattr("app.config.settings.raw_max_points", 1000)
     dbmod.get_db().insert_ticks([Tick("yadio", T0 + i * 60, 50 + i * 0.001) for i in range(2500)])
     p = client.get(H, params={"start": T0, "end": T0 + 3 * 86400, "interval": "raw", "sources": "yadio"})
-    assert 0 < len(p.json()["series"][0]["points"]) <= 1001  # +1: se conserva el último punto
+    pts = p.json()["series"][0]["points"]
+    assert len(pts) == 1000
+    assert pts[0]["t"] == T0 and pts[-1]["t"] == T0 + 2499 * 60
     # un max_points mayor al tope no lo supera
     p = client.get(H, params={"start": T0, "end": T0 + 3 * 86400, "interval": "raw", "sources": "yadio", "max_points": 5000})
-    assert len(p.json()["series"][0]["points"]) <= 1001
+    assert len(p.json()["series"][0]["points"]) == 1000
 
+
+def test_downsample_exact_count_and_endpoints():
+    from app.aggregation import downsample
+    ticks = [Tick("yadio", T0 + i, 1.0) for i in range(25_000)]
+    for m in (2, 3, 7, 20_000, 24_999):
+        out = downsample(ticks, m)
+        assert len(out) == m and out[0].ts == T0 and out[-1].ts == T0 + 24_999
+        assert len({t.ts for t in out}) == m
+    assert [t.ts for t in downsample(ticks, 1)] == [T0 + 24_999]
+    assert downsample(ticks[:5], 10) == ticks[:5]
+
+
+def test_raw_max_points_must_be_positive():
+    with pytest.raises(ValueError):
+        Settings(_env_file=None, raw_max_points=0)
+
+
+def test_collect_not_skipped_when_all_sources_fail(client, monkeypatch):
+    from app.collector import collector
+    from app.sources.base import RateSource
+
+    class Boom(RateSource):
+        name, label, unit = "boom", "b", "USD"
+
+        async def fetch(self, c):
+            raise SourceError("caída")
+
+    monkeypatch.setattr(collector, "sources", [Boom()])
+    monkeypatch.setattr(collector, "last_run", None)
+    r = client.post("/api/v1/rates/collect")
+    assert r.status_code == 200 and r.json()["collected"] == [] and r.json()["skipped"] is False
 
 def test_raw_default_cap_is_20000():
     assert Settings(_env_file=None).raw_max_points == 20_000
@@ -125,7 +158,9 @@ def test_source_error_truncates_upstream_body():
         c = httpx.AsyncClient(transport=httpx.MockTransport(handler))
         with pytest.raises(SourceError) as ei:
             asyncio.run(src.fetch(c))
-        assert len(str(ei.value)) < 400
+        msg = str(ei.value)
+        run = max(len(m) for m in __import__("re").findall(r"x+", msg))
+        assert 100 < run <= 200
 
 
 def test_collector_status_false_after_task_died():

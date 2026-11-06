@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     binance_rows: int = 10
 
     # Tope de puntos en respuestas "raw" (el cliente puede pedir menos, nunca más)
-    raw_max_points: int = 20_000
+    raw_max_points: int = Field(20_000, ge=1)
 
     # Rango máximo consultable (días) y máximo de cubetas al rellenar huecos (fill != none)
     max_range_days: int = 7300
