@@ -62,6 +62,7 @@ Todas las variables llevan el prefijo `RATES_` y se leen del entorno o de `.env`
 | `RATES_RAW_MAX_POINTS` | `20000` | Tope de puntos en `interval=raw`. Mínimo 1 |
 | `RATES_MAX_RANGE_DAYS` | `7300` | Rango máximo de una consulta, unos 20 años |
 | `RATES_MAX_FILL_BUCKETS` | `100000` | Cubetas máximas cuando `fill` no es `none` |
+| `RATES_EXPORT_MAX_CELLS` | `400000` | Tope de celdas de `history.xlsx` (puntos por columnas de hoja). Mínimo 1000 |
 | `RATES_IMPORT_MAX_BYTES` | `10000000` | Tamaño máximo del CSV de `/import` |
 | `RATES_CORS_ORIGINS` | `[]` | Orígenes CORS permitidos. Vacío significa solo mismo origen |
 | `RATES_API_KEY` | vacío | Clave para `POST /import` y `POST /collect`. Vacía, ambos responden 503 |
@@ -107,7 +108,7 @@ La misma consulta como CSV descargable. Se emite por bloques de 2.000 filas, as�
 | `value` | Solo `wide`: `close` (defecto), `open`, `high`, `low`, `avg` |
 | `sep` | Un carácter. `;` para Excel en español |
 | `decimal` | Un carácter. Por defecto `,` si `sep=;`, si no `.`. Igual a `sep` da 422 |
-| `filename` | Se sanea a `A-Za-z0-9._-`; si no queda nada útil se arma uno con el intervalo y el rango |
+| `filename` | Se sanea a `A-Za-z0-9._-` y, si no termina en `.csv`, se le agrega; si no queda nada útil se arma uno con el intervalo y el rango |
 
 Con `interval=raw` el `layout` no aplica: sale una fila por tick con `source, date, timestamp, price, buy, sell`.
 
@@ -122,7 +123,7 @@ La misma consulta como libro de Excel. Acepta los parámetros de `/history` y lo
 | Parámetro | Valores |
 |---|---|
 | `value` | Qué valor de la vela va en la hoja `Resumen`: `close` (defecto), `open`, `high`, `low`, `avg` |
-| `filename` | Igual que en `history.csv`; si no termina en `.xlsx` se le agrega |
+| `filename` | Igual que en `history.csv`, con extensión `.xlsx` |
 
 El libro trae:
 
@@ -130,7 +131,7 @@ El libro trae:
 - Una hoja por fuente con `date, open, high, low, close, avg, count`.
 - Con `interval=raw`, `Resumen` lleva el precio de cada tick por fuente y las hojas por fuente traen `date, price, buy, sell`.
 
-Las fechas son fechas reales de Excel en hora local (UTC-4) sin zona, los precios usan el formato `#,##0.0000`, y cada hoja tiene la cabecera congelada y autofiltro. El libro se arma en memoria; con `interval=raw` el tope de filas por fuente es `RATES_RAW_MAX_POINTS`. Esa es la exportación cara: con varias fuentes en raw, el libro lleva hasta `RATES_RAW_MAX_POINTS` filas por fuente en `Resumen` y otra vez en cada hoja, y todo pasa por memoria antes de enviarse. Para volúmenes grandes conviene `history.csv`, que se emite por bloques.
+Las fechas son fechas reales de Excel en hora local (UTC-4) sin zona, los precios usan el formato `#,##0.0000`, y cada hoja tiene la cabecera congelada y autofiltro. El libro se arma en memoria. Con `interval=raw` cada fuente trae como máximo `RATES_RAW_MAX_POINTS` filas (20.000 por defecto), así que el costo real está en `hour` y `day` sobre rangos largos: cien mil velas horarias por fuente pesan decenas de segundos de CPU y cientos de MB. Por eso el libro tiene un tope de celdas, `RATES_EXPORT_MAX_CELLS` (400.000): se cuentan los puntos de todas las fuentes por las columnas de la hoja de cada fuente (7 con velas, 4 en raw), y si se supera la respuesta es 422 con el aviso de usar `history.csv`, que se emite por bloques y no tiene tope. Además las construcciones de XLSX y PDF se serializan: solo una a la vez por proceso, y las demás esperan su turno sin recibir error.
 
 ```bash
 curl -o tasas.xlsx "localhost:8000/api/v1/rates/history.xlsx?days=365&sources=binance_p2p,bcv&fill=forward"

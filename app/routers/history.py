@@ -14,6 +14,7 @@ from ..aggregation import CandleField, Fill, Interval
 from ..config import settings
 from ..csv_export import Layout, csv_chunks, csv_rows, export_filename
 from ..db import get_db
+from ..exports_guard import run_heavy
 from ..models import HistoryResponse, LatestPoint, SourceInfo
 from ..pdf_report import (
     PDF_MEDIA_TYPE,
@@ -23,7 +24,7 @@ from ..pdf_report import (
     parse_month,
     summarize,
 )
-from ..series import build_series, tick_to_point
+from ..series import InvalidQuery, build_series, tick_to_point
 from ..sources import REGISTRY
 from ..xlsx_export import XLSX_MEDIA_TYPE, build_workbook
 from .common import RATES_PREFIX, RATES_TAGS, HistoryQuery, resolve_sources_or_all
@@ -117,7 +118,7 @@ async def history_csv(
     ts_from, ts_to, names = q.resolve()
     data = await _load_series(q, names, ts_from, ts_to)
     rows = csv_rows(data, q.interval, layout, value, dec)
-    name = export_filename(filename, q.interval, ts_from, ts_to)
+    name = export_filename(filename, q.interval, ts_from, ts_to, ext="csv")
     return StreamingResponse(
         csv_chunks(rows, sep),
         media_type="text/csv; charset=utf-8",
@@ -140,10 +141,15 @@ async def history_xlsx(
 ):
     ts_from, ts_to, names = q.resolve()
     data = await _load_series(q, names, ts_from, ts_to)
-    content = await asyncio.to_thread(build_workbook, data, names, q.interval, value)
+    columns = 4 if q.interval is Interval.raw else 7
+    cells = sum(len(points) for points in data.values()) * columns
+    if cells > settings.export_max_cells:
+        raise InvalidQuery(
+            f"El libro tendría unas {cells:,} celdas y el tope es {settings.export_max_cells:,}. "
+            "Reduzca el rango, use un intervalo mayor o pida `history.csv`, que no tiene ese límite."
+        )
+    content = await run_heavy(build_workbook, data, names, q.interval, value)
     name = export_filename(filename, q.interval, ts_from, ts_to, ext="xlsx")
-    if not name.lower().endswith(".xlsx"):
-        name += ".xlsx"
     return Response(
         content, media_type=XLSX_MEDIA_TYPE, headers={"Content-Disposition": f'attachment; filename="{name}"'}
     )
@@ -173,12 +179,10 @@ async def report_pdf(
     if reference is None:  # la brecha contra el BCV se calcula aunque no se haya pedido como serie
         reference = await asyncio.to_thread(load, REFERENCE_SOURCE)
     stats = summarize(data, reference)
-    content = await asyncio.to_thread(build_monthly_report, first_day, data, stats)
+    content = await run_heavy(build_monthly_report, first_day, data, stats)
     name = export_filename(
         filename or f"ves_report_{first_day:%Y-%m}.pdf", Interval.day, ts_from, ts_to, "pdf"
     )
-    if not name.lower().endswith(".pdf"):
-        name += ".pdf"
     return Response(
         content, media_type=PDF_MEDIA_TYPE, headers={"Content-Disposition": f'attachment; filename="{name}"'}
     )

@@ -36,6 +36,7 @@ python -m scripts.backfill csv --source bcv --file bcv.csv
 | `app/series.py` | Interpreta fechas y rangos y arma series raw o de velas; lanza `InvalidQuery` |
 | `app/csv_export.py` | Filas raw, long y wide, alineación por `t` (`align_by_t`), formato numérico, emisión por bloques, nombre de archivo |
 | `app/xlsx_export.py` | `build_workbook`: libro .xlsx con hoja `Resumen` (una columna `fuente (campo)` por fuente y gráfico nativo hasta 5000 filas) y una hoja por fuente |
+| `app/exports_guard.py` | `run_heavy`: semáforo que serializa las construcciones de XLSX y PDF |
 | `app/pdf_report.py` | `parse_month`, `month_bounds`, `summarize` y `build_monthly_report`: informe mensual en PDF (reportlab + gráfico matplotlib Agg) |
 | `app/tick_parsing.py` | Parser de fechas, precios y filas a `Tick`, compartido por `/import` y `scripts/backfill.py` |
 | `app/security.py` | `require_api_key`, `ImportGuardMiddleware` y cabeceras de seguridad con CSP |

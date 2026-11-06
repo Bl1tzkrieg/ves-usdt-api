@@ -118,3 +118,44 @@ def test_build_workbook_skips_chart_above_row_cap():
     ws = load_workbook(BytesIO(above))["Resumen"]
     assert ws._charts == []
     assert ws.max_row == MAX_CHART_ROWS + 2
+
+
+def test_xlsx_over_cell_cap_is_422(client, monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "export_max_cells", 1_000)
+    r = client.get(XLSX, params={**RANGE, "interval": "raw"})  # ~44 puntos: cabe
+    assert r.status_code == 200
+    r = client.get(XLSX, params={**RANGE, "interval": "hour", "fill": "forward"})  # 240 horas x 2 x 7
+    assert r.status_code == 422
+    assert "history.csv" in r.text
+
+
+def test_heavy_builds_are_serialized(client, monkeypatch):
+    import threading
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
+    import app.routers.history as hist
+
+    lock, state = threading.Lock(), {"now": 0, "peak": 0}
+    real = hist.build_workbook
+
+    def slow(*args):
+        with lock:
+            state["now"] += 1
+            state["peak"] = max(state["peak"], state["now"])
+        time.sleep(0.15)
+        try:
+            return real(*args)
+        finally:
+            with lock:
+                state["now"] -= 1
+
+    monkeypatch.setattr(hist, "build_workbook", slow)
+    with ThreadPoolExecutor(3) as pool:
+        codes = [
+            f.result().status_code for f in [pool.submit(client.get, XLSX, params=RANGE) for _ in range(3)]
+        ]
+    assert codes == [200, 200, 200]
+    assert state["peak"] == 1
