@@ -46,8 +46,8 @@ Importe `ves-rates-workflow.json` en la instancia de prueba, cree las credencial
 
 | Paso | Acción | Esperado por nodo |
 |---|---|---|
-| 2.1 | Ejecutar desde "Cada día 06:00" | POST /collect: 200 con `collected`, `status`, `skipped`. POST /backfill/yadio 7 días: 200 con `{received, inserted, skipped}` (con red hacia Yadio) por la salida de éxito → "Backfill OK". No hay notificación |
-| 2.2 | Ejecutar 2.1 otra vez enseguida | /collect: `skipped: true` (menos de 30 s) o 409; el backfill igual corre y `inserted` es 0 |
+| 2.1 | Ejecutar desde "Cada día 06:00" | POST /collect: 200 con `collected`, `status`, `skipped`. POST /backfill/yadio 7 días: 200 con `{received, inserted, skipped, ignored_days}` (con red hacia Yadio) por la salida de éxito → "Backfill OK". No hay notificación |
+| 2.2 | Ejecutar 2.1 otra vez enseguida | /collect: `skipped: true` (menos de 30 s) o 409; el backfill igual corre, `inserted` es 0 e `ignored_days` cuenta los días ya cubiertos |
 | 2.3 | Con datos de `seed_demo`, ejecutar desde "Cada hora" | GET /stats: un ítem por fuente. Calcular alertas: un ítem con `alerts` = las fuentes cuyo `abs(change.24h.pct) >= 3` en esos datos. Si hay alertas, "¿Hay alertas?" va por *true* y llegan un Telegram y un correo con el texto de `message`; si no, va a "Sin alertas" |
 
 Para forzar una alerta conocida, fije el resultado de "GET /stats" con **Pin data** usando los ítems del fixture y ejecute desde "Cada hora": deben salir las alertas de `binance_p2p` y `yadio`.

@@ -13,7 +13,7 @@ Dos disparadores en un mismo flujo, con la zona horaria del flujo en `America/Ca
 | Cada día 06:00 | Schedule Trigger (1.2) | Dispara la rama diaria a las 06:00 |
 | POST /collect | HTTP Request (4.2) | `POST {RATES_BASE_URL}/api/v1/rates/collect` con la credencial de cabecera. Si falla (409 por recolección en curso, API caída) sigue igual: el recolector interno corre cada 5 minutos y esto es solo un empujón |
 | POST /backfill/yadio 7 días | HTTP Request (4.2) | `POST .../backfill/yadio?days=7` con la credencial. Timeout 60 s. Tiene salida de error |
-| Backfill OK | No Op (1) | Fin de la rama cuando el backfill respondió 2xx (`{received, inserted, skipped}`) |
+| Backfill OK | No Op (1) | Fin de la rama cuando el backfill respondió 2xx (`{received, inserted, skipped, ignored_days}`) |
 | Mensaje: backfill falló | Edit Fields / Set (3.4) | Arma `subject` y `message` con la hora y el error |
 | Cada hora | Schedule Trigger (1.2) | Dispara la rama de alertas cada hora, en el minuto 5 |
 | GET /stats | HTTP Request (4.2) | `GET .../stats?sources=binance_p2p,yadio,bcv,paralelo&reference=bcv`, sin clave. Cada fuente sale como un ítem. Tiene salida de error |

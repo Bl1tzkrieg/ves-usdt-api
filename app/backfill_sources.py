@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 
 import httpx
 
 from .aggregation import LOCAL_TZ
-from .db import Tick
+from .db import Database, Tick
 
 YADIO_HIST_URL = "https://api.yadio.io/hist/{days}/{currency}"
 YADIO_MAX_DAYS = 365
@@ -59,3 +60,37 @@ async def fetch_yadio_history(
         except (KeyError, ValueError, TypeError):
             result.skipped += 1
     return result
+
+
+@dataclass
+class GapFill:
+    """`ticks`: los que caen en días sin datos; `ignored_days`: días locales que ya tenían ticks."""
+
+    ticks: list[Tick]
+    ignored_days: int
+
+
+def keep_missing_days(db: Database, ticks: list[Tick]) -> GapFill:
+    """Descarta los ticks diarios cuyo día local ya tiene algún tick de la misma fuente.
+
+    El histórico trae un punto por día a la medianoche; si el recolector ya cubrió ese día, ese punto
+    (parcial o de cierre) se sumaría a sus velas y falsearía apertura, mínimo y máximo.
+    Una consulta por fuente sobre el rango de los ticks recibidos.
+    """
+    by_source: dict[str, list[Tick]] = defaultdict(list)
+    for t in ticks:
+        by_source[t.source].append(t)
+    kept: list[Tick] = []
+    ignored: set[tuple[str, date]] = set()
+    for source, group in by_source.items():
+        lo = min(t.ts for t in group)
+        hi = max(t.ts for t in group)
+        # Se amplía un día por lado para abarcar los días locales completos de los extremos.
+        covered = db.days_with_ticks(source, lo - 86400, hi + 86400)
+        for t in group:
+            day = datetime.fromtimestamp(t.ts, LOCAL_TZ).date()
+            if day in covered:
+                ignored.add((source, day))
+            else:
+                kept.append(t)
+    return GapFill(ticks=kept, ignored_days=len(ignored))

@@ -46,6 +46,14 @@ mkdir -p ./data && sudo chown 10001 ./data
 docker run -p 8000:8000 -v "$PWD/data:/data" ves-rates
 ```
 
+Si actualiza desde una imagen anterior, que corría como root, el volumen `rates-data` y su `rates.db` siguen siendo de root y el nuevo proceso no puede escribir. La app arranca y `/health` responde, pero el recolector no guarda nada. Una sola vez, antes de arrancar la imagen nueva:
+
+```bash
+docker run --rm -u 0 -v rates-data:/data --entrypoint chown ves-rates -R 10001 /data
+```
+
+`/health` y `GET /collector` muestran el último error de escritura en `collector.last_error` (`null` si la última escritura fue bien).
+
 ## Configuración
 
 Todas las variables llevan el prefijo `RATES_` y se leen del entorno o de `.env`. Las listas van en JSON.
@@ -177,7 +185,7 @@ curl -o informe.pdf "localhost:8000/api/v1/rates/report.pdf?month=2026-10&source
 curl -X POST -H "X-API-Key: $RATES_API_KEY" localhost:8000/api/v1/rates/collect
 ```
 
-`POST /backfill/yadio?days=365` pide a Yadio un punto por día (`days` se recorta a 1..365) y lo inserta; los días ya guardados se ignoran, así que repetirlo es inocuo. Está pensado para planificadores como n8n que mantienen el histórico al día sin acceso al disco. No lleva cuerpo. Responde `{"received": n, "inserted": m, "skipped": k}`, donde `received` cuenta los puntos válidos recibidos de Yadio, `inserted` los que eran nuevos y `skipped` los que no se pudieron interpretar. La consulta a Yadio usa `RATES_HTTP_TIMEOUT_SECONDS`. Si Yadio falla o responde algo inesperado, 502 con un detalle corto.
+`POST /backfill/yadio?days=365` pide a Yadio un punto por día (`days` se recorta a 1..365) y lo guarda a la medianoche local, pero solo en los días que no tienen ningún tick de `yadio`. Los días que el recolector ya cubrió no se tocan: un punto diario extra se mezclaría con sus velas y movería apertura, mínimo y máximo. Repetirlo es inocuo. Está pensado para planificadores como n8n que mantienen el histórico al día sin acceso al disco. No lleva cuerpo. Responde `{"received": n, "inserted": m, "skipped": k, "ignored_days": d}`, donde `received` cuenta los puntos válidos recibidos de Yadio, `inserted` los que se guardaron, `skipped` los que no se pudieron interpretar e `ignored_days` los días que ya tenían datos. El modo `yadio` de `scripts/backfill.py` aplica la misma regla. La consulta a Yadio usa `RATES_HTTP_TIMEOUT_SECONDS`. Si Yadio falla o responde algo inesperado, 502 con un detalle corto.
 
 ```bash
 curl -X POST -H "X-API-Key: $RATES_API_KEY" "localhost:8000/api/v1/rates/backfill/yadio?days=365"
@@ -219,7 +227,7 @@ Antes de leer el cuerpo, un middleware valida la clave y el tamaño. Exige `Cont
 `scripts/backfill.py` escribe directo en `RATES_DB_PATH`, sin pasar por la API. Todos los modos que importan aceptan `--source` (obligatorio) y `--dry-run`. `--ts-key` y `--price-key` solo se aplican a los modos `json` y `csv`; `yadio` y `pydolarve` los ignoran.
 
 ```bash
-# Yadio, USDT/VES, un punto diario, hasta 365 días
+# Yadio, USDT/VES, un punto diario, hasta 365 días; solo en días sin datos de la fuente
 python -m scripts.backfill yadio --source yadio --days 365
 
 # Cualquier URL que devuelva JSON con una lista de puntos
@@ -289,7 +297,8 @@ Si tenía un cliente contra la versión inicial, esto rompe:
 - `RATES_CORS_ORIGINS` era `["*"]` y ahora es `[]`. Un front en otro origen tiene que listarse.
 - La CSP bloquea scripts inline. Si modificó `index.html` con JavaScript propio, muévalo a `static/app.js`.
 - `seed_demo` se niega a escribir sobre una base con datos sin `--force`.
-- El contenedor ya no corre como root; ver la nota de Docker sobre carpetas del host.
+- El contenedor ya no corre como root; ver la nota de Docker sobre carpetas del host. Un volumen creado con la imagen anterior pertenece a root: ejecute una vez `docker run --rm -u 0 -v rates-data:/data --entrypoint chown ves-rates -R 10001 /data` o el recolector no podrá escribir (lo verá en `collector.last_error` de `/health`).
+- `POST /backfill/yadio` y `scripts/backfill.py yadio` solo rellenan días locales sin datos de la fuente y la respuesta del endpoint suma `ignored_days`.
 
 ## Automatización con n8n
 

@@ -10,7 +10,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
 
 from .. import aggregation as agg
-from ..backfill_sources import BackfillError, fetch_yadio_history
+from ..backfill_sources import BackfillError, fetch_yadio_history, keep_missing_days
 from ..collector import CollectInProgress, collector
 from ..config import settings
 from ..db import get_db
@@ -46,14 +46,25 @@ def _client_factory() -> httpx.AsyncClient:
 async def backfill_yadio(
     days: int = Query(365, description="Días de histórico; se recorta al rango 1..365"),
 ):
-    """Pide a Yadio un punto por día y lo inserta; los ticks ya existentes se ignoran (idempotente)."""
+    """Pide a Yadio un punto por día y lo inserta solo en los días locales sin datos de `yadio`.
+
+    Los días que ya tienen ticks (p. ej. del recolector) no se tocan y se cuentan en `ignored_days`;
+    así una segunda llamada no inserta nada (idempotente).
+    """
     try:
         async with _client_factory() as client:
             result = await fetch_yadio_history(client, days)
     except BackfillError as e:
         raise HTTPException(502, str(e)) from e
-    inserted = await asyncio.to_thread(get_db().insert_ticks, result.ticks)
-    return {"received": len(result.ticks), "inserted": inserted, "skipped": result.skipped}
+    db = get_db()
+    gaps = await asyncio.to_thread(keep_missing_days, db, result.ticks)
+    inserted = await asyncio.to_thread(db.insert_ticks, gaps.ticks)
+    return {
+        "received": len(result.ticks),
+        "inserted": inserted,
+        "skipped": result.skipped,
+        "ignored_days": gaps.ignored_days,
+    }
 
 
 @router.post(

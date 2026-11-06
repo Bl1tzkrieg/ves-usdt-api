@@ -38,7 +38,7 @@ from typing import Any
 import httpx
 
 from app.aggregation import LOCAL_TZ
-from app.backfill_sources import BackfillError, BackfillResult, fetch_yadio_history
+from app.backfill_sources import BackfillError, BackfillResult, fetch_yadio_history, keep_missing_days
 from app.db import Tick, get_db
 from app.sources import REGISTRY
 from app.tick_parsing import decimal_hint_for, find_list, rows_to_ticks, sniff_dialect
@@ -126,7 +126,8 @@ def cmd_yadio(a: argparse.Namespace) -> None:
 
     Respuesta: [{"date": "09/14/2026", "rate": 940.01, "avg24h": ..., "usdbtc": ...}, ...]
     `date` es MM/DD/YYYY y `rate` son VES por 1 USD (mercado libre, base USDT). Un punto por día;
-    se guarda a la medianoche local de ese día.
+    se guarda a la medianoche local de ese día y solo en los días locales que aún no tienen ticks
+    de la fuente (igual que `POST /backfill/yadio`), para no mezclarlo con lo del recolector.
     """
     check_source(a.source)
     if a.days > 365:
@@ -141,10 +142,12 @@ def cmd_yadio(a: argparse.Namespace) -> None:
     except BackfillError as e:
         print(f"Error: {e}")
         sys.exit(1)
-    ticks = result.ticks
     if result.skipped:
         print(f"{result.skipped} puntos no interpretados")
-    save(ticks, a.source, a.dry_run)
+    gaps = keep_missing_days(get_db(), result.ticks)
+    if gaps.ignored_days:
+        print(f"{gaps.ignored_days} días ya tenían datos de '{a.source}'; no se tocan")
+    save(gaps.ticks, a.source, a.dry_run)
 
 
 def cmd_pydolarve(a: argparse.Namespace) -> None:
