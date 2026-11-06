@@ -123,7 +123,7 @@ def test_raw_default_cap_is_20000():
 
 def test_filename_sanitised(client):
     r = client.get(H + ".csv", params={"days": 5, "filename": 'a";x=y'})
-    assert r.headers["content-disposition"] == 'attachment; filename="a_x_y"'
+    assert r.headers["content-disposition"] == 'attachment; filename="a_x_y.csv"'
 
 
 def test_filename_empty_after_sanitising_falls_back(client):
@@ -133,7 +133,7 @@ def test_filename_empty_after_sanitising_falls_back(client):
 
 def test_filename_length_capped(client):
     r = client.get(H + ".csv", params={"days": 5, "filename": "a" * 500})
-    assert r.headers["content-disposition"] == f'attachment; filename="{"a" * 120}"'
+    assert r.headers["content-disposition"] == f'attachment; filename="{"a" * 120}.csv"'
 
 
 def test_unicode_digit_start_422(client):

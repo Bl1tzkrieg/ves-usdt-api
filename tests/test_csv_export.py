@@ -49,4 +49,7 @@ def test_csv_chunks_splits_by_row_count():
 
 def test_export_filename_sanitized_or_derived():
     assert export_filename("my file/../x.csv", Interval.day, T0, T0 + DAY) == "my_file_.._x.csv"
+    assert export_filename("report", Interval.day, T0, T0 + DAY) == "report.csv"
+    assert export_filename("Report.CSV", Interval.day, T0, T0 + DAY) == "Report.CSV"
+    assert export_filename("x", Interval.day, T0, T0 + DAY, ext="xlsx") == "x.xlsx"
     assert export_filename("../", Interval.week, T0, T0 + DAY) == "ves_rates_week_2025-01-01_2025-01-01.csv"

@@ -20,7 +20,8 @@ def client(monkeypatch):
     mem = Database(":memory:")
     dbmod.set_db(mem)
     ticks = []
-    for d in range(10):  # 10 días, 4 ticks/día para binance; BCV solo días hábiles (0..4 y 7..9)
+    # 10 días, 4 ticks/día para binance; BCV 5 de cada 7 días, imitando días hábiles (0..4 y 7..9)
+    for d in range(10):
         for h in (8, 12, 16, 20):
             ticks.append(Tick("binance_p2p", T0 + d * DAY + h * 3600, 100 + d + h / 100))
         if d % 7 < 5:

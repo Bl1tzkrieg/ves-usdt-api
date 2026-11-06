@@ -116,10 +116,10 @@ def export_filename(
 ) -> str:
     """Nombre saneado (solo `A-Za-z0-9._-`); si no queda nada útil, uno derivado del rango.
 
-    El nombre derivado lleva la extensión `ext`; el pedido se respeta tal cual (saneado).
+    Tanto el nombre pedido como el derivado terminan en `.ext` (se agrega si falta, sin importar mayúsculas).
     """
     safe = re.sub(r"[^A-Za-z0-9._-]+", "_", requested or "")[:FILENAME_MAX_LEN]
     if re.search(r"[A-Za-z0-9]", safe):
-        return safe
+        return safe if safe.lower().endswith(f".{ext}") else f"{safe}.{ext}"
     first, last = agg.to_local(ts_from).date(), agg.to_local(ts_to - 1).date()
     return f"ves_rates_{interval.value}_{first}_{last}.{ext}"
