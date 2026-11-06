@@ -15,10 +15,6 @@ from io import BytesIO
 from statistics import fmean
 from typing import Any
 
-from matplotlib.backends.backend_agg import FigureCanvasAgg
-from matplotlib.dates import DateFormatter, DayLocator
-from matplotlib.figure import Figure
-from matplotlib.ticker import FuncFormatter
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_RIGHT
 from reportlab.lib.pagesizes import A4
@@ -195,6 +191,12 @@ def chart_points(data: Mapping[str, Sequence[dict[str, Any]]]) -> dict[str, list
 
 def _chart_png(data: Mapping[str, Sequence[dict[str, Any]]], month: date) -> bytes:
     """Cierres diarios de cada fuente, un solo eje Y, como PNG en memoria."""
+    # Import perezoso: los workers que nunca arman un PDF no pagan los ~35 MB de matplotlib
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    from matplotlib.dates import DateFormatter, DayLocator
+    from matplotlib.figure import Figure
+    from matplotlib.ticker import FuncFormatter
+
     fig = Figure(figsize=(7.2, 3.4), dpi=200)
     FigureCanvasAgg(fig)
     ax = fig.add_subplot()
