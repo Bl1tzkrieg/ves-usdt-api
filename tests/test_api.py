@@ -127,6 +127,18 @@ def test_import_millisecond_timestamps_stored_as_seconds(client):
     assert get_price(client, "bcv", 1_577_851_200) == 10
 
 
+def test_import_date_time_columns_and_empty_timestamp(client):
+    r = _import(client, "date,time,price\n2020-01-01,12:00,5\n", source="bcv")
+    assert r.json()["inserted"] == 1 and get_price(client, "bcv", 1_577_851_200) == 5
+    r = _import(client, "timestamp,date,price\n,2020-01-02,6\n", source="bcv")
+    assert r.json()["inserted"] == 1 and get_price(client, "bcv", 1_577_851_200 + 86400) == 6
+
+
+def test_import_ambiguous_price_rejected(client):
+    r = _import(client, "fecha,precio\n2020-01-01,\"1.234\"\n", source="bcv").json()
+    assert (r["inserted"], r["rejected"]) == (0, 1)
+
+
 def test_import_rejected_sample_capped_at_10(client):
     body = "fecha,precio\n" + "".join(f"2020-01-01,x{i}\n" for i in range(15))
     r = _import(client, body, source="bcv").json()

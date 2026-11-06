@@ -49,6 +49,17 @@ def test_parse_ts_mm_dd_only_with_explicit_fmt():
         ("1,5", 1.5),
         ("5.5", 5.5),
         ("Bs 950", 950.0),
+        ("Bs. 950", 950.0),
+        ("Bs.950", 950.0),
+        ("1 234,56", 1234.56),
+        ("1\xa0234,56", 1234.56),
+        ("0.125", 0.125),
+        # ambiguos (agrupación de miles vs decimal): no se adivina
+        ("1.234", None),
+        ("1,234", None),
+        ("Bs 1.234", None),
+        ("1.234.567", None),
+        ("1,234,567", None),
         (12, 12.0),
         ("abc", None),
         ("", None),
@@ -64,10 +75,6 @@ def test_parse_price(value, expected):
 def test_sniff_dialect_semicolon():
     assert sniff_dialect("fecha;precio\n2020-01-01;5,5\n").delimiter == ";"
     assert issubclass(sniff_dialect("sin delimitador"), csv.Dialect)
-
-
-def _rows(*dicts):
-    return list(dicts)
 
 
 def test_rows_to_ticks_ok_and_extra():
@@ -125,3 +132,25 @@ def test_rows_to_ticks_explicit_keys_and_pairs():
     # el par [ts, precio] no depende de las claves explícitas
     assert [(t.ts, t.price) for t in res.ticks] == [(JAN1, 7.0), (JAN1 + 86400, 8.0)]
     assert [r["row"] for r in res.rejected] == [3]
+
+
+def test_rows_to_ticks_ambiguous_price_rejected_with_reason():
+    res = rows_to_ticks([{"fecha": "2020-01-01", "precio": "1.234"}], default_source="bcv", allowed_sources={"bcv"})
+    assert res.ticks == []
+    assert res.rejected[0]["row"] == 1 and "precio" in res.rejected[0]["reason"]
+
+
+def test_rows_to_ticks_prefers_date_over_time_and_falls_back_on_empty():
+    res = rows_to_ticks(
+        [
+            {"date": "2020-01-01", "time": "garbage", "price": "5"},
+            {"timestamp": "", "date": "2020-01-02", "price": "6"},
+            {"timestamp": "nope", "date": "2020-01-03", "price": "7"},
+            {"timestamp": "", "date": "", "price": "8"},
+        ],
+        default_source="bcv",
+        allowed_sources={"bcv"},
+    )
+    assert [t.ts for t in res.ticks] == [JAN1, JAN1 + 86400, JAN1 + 2 * 86400]
+    assert [r["row"] for r in res.rejected] == [4]
+    assert "ausente" in res.rejected[0]["reason"]

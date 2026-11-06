@@ -277,7 +277,8 @@ async def import_csv(
     - `source` (opcional si se pasa `?source=`)
     - `buy`, `sell` (opcionales → se guardan en `extra`)
 
-    Las filas inválidas no abortan la importación: se informan en `rejected`/`rejected_sample`.
+    Las filas inválidas no abortan la importación: se informan en `rejected`/`rejected_sample`
+    (`row` es el índice de fila de datos, desde 1, sin contar la cabecera).
     """
     content = await _read_csv_text(file)
     reader = csv.DictReader(io.StringIO(content), dialect=sniff_dialect(content[:2048]))
