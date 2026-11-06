@@ -190,7 +190,7 @@ def test_alert_code_dedups_within_and_across_runs(workflow, fixture_workflow):
     summary = first["out"][0]["json"]
     assert summary["threshold"] == 3
     assert [a["source"] for a in summary["alerts"]] == ["binance_p2p", "yadio"]
-    assert summary["duplicates"] == ["binance_p2p|2026-11-06T10:00:00-04:00"]
+    assert summary["duplicates"] == ["binance_p2p|2026-11-06|+"]
     assert summary["invalid"] == []
     binance = summary["alerts"][0]
     assert (binance["price"], binance["pct"], binance["from_price"]) == (650.5, 4.2, 624.25)
@@ -203,6 +203,52 @@ def test_alert_code_dedups_within_and_across_runs(workflow, fixture_workflow):
     assert second["ok"]
     assert second["out"][0]["json"]["alerts"] == []
     assert len(second["out"][0]["json"]["duplicates"]) == 3
+
+
+def _stat(source: str, latest_date: str, pct: float) -> dict:
+    return {
+        "json": {
+            "source": source,
+            "latest": 100.0,
+            "latest_date": latest_date,
+            "change": {"24h": {"abs": pct, "pct": pct, "from_price": 100.0 - pct, "from_date": "x"}},
+        }
+    }
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="sin node no se puede ejecutar el nodo Code")
+def test_sustained_move_alerts_once_per_direction_per_local_day(workflow):
+    code = _nodes_by_name(workflow)["Calcular alertas"]["parameters"]["jsCode"]
+    first = _run_code(code, [_stat("yadio", "2026-11-06T10:00:00-04:00", 4.0)], {}, {})
+    assert [a["key"] for a in first["out"][0]["json"]["alerts"]] == ["yadio|2026-11-06|+"]
+
+    # Tick nuevo una hora después, mismo día local y mismo signo: no se repite.
+    later = _run_code(code, [_stat("yadio", "2026-11-06T11:05:00-04:00", 4.5)], {}, first["staticData"])
+    assert later["out"][0]["json"]["alerts"] == []
+    assert later["out"][0]["json"]["duplicates"] == ["yadio|2026-11-06|+"]
+
+    # Cambio de dirección el mismo día: avisa.
+    reverse = _run_code(code, [_stat("yadio", "2026-11-06T15:00:00-04:00", -3.5)], {}, later["staticData"])
+    assert [a["key"] for a in reverse["out"][0]["json"]["alerts"]] == ["yadio|2026-11-06|-"]
+
+    # 23:30 en Caracas ya es el día 7 en UTC, pero sigue siendo el día local 6.
+    late = _run_code(code, [_stat("yadio", "2026-11-07T03:30:00Z", 5.0)], {}, reverse["staticData"])
+    assert late["out"][0]["json"]["duplicates"] == ["yadio|2026-11-06|+"]
+
+    # Día local siguiente: avisa de nuevo.
+    next_day = _run_code(code, [_stat("yadio", "2026-11-07T08:00:00-04:00", 4.0)], {}, late["staticData"])
+    assert [a["key"] for a in next_day["out"][0]["json"]["alerts"]] == ["yadio|2026-11-07|+"]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="sin node no se puede ejecutar el nodo Code")
+def test_alert_link_prefers_public_url(workflow):
+    code = _nodes_by_name(workflow)["Calcular alertas"]["parameters"]["jsCode"]
+    items = [_stat("yadio", "2026-11-06T10:00:00-04:00", 4.0)]
+    env = {"RATES_BASE_URL": "http://ves-rates:8000", "RATES_PUBLIC_URL": "https://tasas.example.com/"}
+    message = _run_code(code, items, env, {})["out"][0]["json"]["message"]
+    assert message.endswith("Ver: https://tasas.example.com/")
+    fallback = _run_code(code, items, {"RATES_BASE_URL": "http://ves-rates:8000"}, {})
+    assert fallback["out"][0]["json"]["message"].endswith("Ver: http://ves-rates:8000/")
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="sin node no se puede ejecutar el nodo Code")

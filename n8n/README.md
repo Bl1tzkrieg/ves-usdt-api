@@ -17,7 +17,7 @@ Dos disparadores en un mismo flujo, con la zona horaria del flujo en `America/Ca
 | Mensaje: backfill falló | Edit Fields / Set (3.4) | Arma `subject` y `message` con la hora y el error |
 | Cada hora | Schedule Trigger (1.2) | Dispara la rama de alertas cada hora, en el minuto 5 |
 | GET /stats | HTTP Request (4.2) | `GET .../stats?sources=binance_p2p,yadio,bcv,paralelo&reference=bcv`, sin clave. Cada fuente sale como un ítem. Tiene salida de error |
-| Calcular alertas | Code (2) | Para cada fuente con `change["24h"]` y `abs(pct) >= umbral` arma una alerta con precio, `pct`, `from_price`, `from_date` y el enlace `{RATES_BASE_URL}/`. Deduplica por fuente dentro de la corrida y por `source|latest_date` entre corridas. Si ninguna entrada de `/stats` es válida lanza un error, que va a su salida de error |
+| Calcular alertas | Code (2) | Para cada fuente con `change["24h"]` y `abs(pct) >= umbral` arma una alerta con precio, `pct`, `from_price`, `from_date` y el enlace `{RATES_PUBLIC_URL}/` (o `{RATES_BASE_URL}/` si falta). Deduplica por fuente dentro de la corrida y por `source|día local|signo` entre corridas. Si ninguna entrada de `/stats` es válida lanza un error, que va a su salida de error |
 | ¿Hay alertas? | If (2.2) | `alerts.length > 0` |
 | Sin alertas | No Op (1) | Fin silencioso |
 | Aviso de fallo de stats (una vez por caída) | Code (2) | Recibe los errores de `GET /stats` y de "Calcular alertas". Avisa la primera vez y calla hasta que `/stats` vuelva a responder bien, para no mandar un aviso por hora mientras la API está caída |
@@ -43,6 +43,7 @@ Se leen con `$env`, así que van en el entorno del proceso de n8n (no en el de l
 | Variable | Obligatoria | Para qué |
 |---|---|---|
 | `RATES_BASE_URL` | sí | Base de la API, por ejemplo `http://ves-rates:8000`. Sin barra final (si la trae, el enlace de la página la quita) |
+| `RATES_PUBLIC_URL` | no | URL de la página que abre una persona, para el enlace `Ver:` de las alertas, por ejemplo `https://tasas.example.com`. Si falta o está vacía se usa `RATES_BASE_URL`, que suele ser una dirección interna |
 | `RATES_ALERT_PCT` | no | Umbral en % de la variación 24h. Por defecto 3. Vacío, no numérico o `<= 0` usa 3. Decimal con punto: `2.5` |
 | `RATES_TELEGRAM_CHAT_ID` | si usa Telegram | Chat o canal destino |
 | `RATES_ALERT_EMAIL_FROM`, `RATES_ALERT_EMAIL_TO` | si usa correo | Remitente y destinatario(s), separados por coma |
@@ -73,11 +74,11 @@ El JSON no trae enlaces de credenciales (ni nombres ni IDs). Créelas en n8n y a
 ## Deduplicación y sus límites
 
 - **Dentro de una corrida**: una fuente produce como mucho una alerta aunque `/stats` la repita.
-- **Entre corridas**: "Calcular alertas" guarda en los datos estáticos del flujo (`$getWorkflowStaticData('global')`) la clave `source|latest_date` de cada alerta enviada y la conserva 7 días. El mismo tick no vuelve a avisar.
+- **Entre corridas**: "Calcular alertas" guarda en los datos estáticos del flujo (`$getWorkflowStaticData('global')`) la clave `source|AAAA-MM-DD|signo` de cada alerta enviada (día local de `latest_date` en America/Caracas y `+` o `-` según el signo de `pct`) y la conserva 7 días. Un movimiento sostenido avisa una vez por dirección y por día, aunque entren ticks nuevos cada 5 minutos.
 - Los datos estáticos solo se persisten en ejecuciones de producción (flujo activo). En una ejecución manual desde el editor se leen y modifican en memoria pero no se guardan, así que dos pruebas manuales seguidas avisan las dos veces.
 - Son por flujo y por instancia: reimportar el JSON crea un flujo nuevo con datos estáticos vacíos, y dos instancias de n8n con el mismo flujo avisan cada una por su cuenta.
 - La clave se marca **antes** de enviar: si Telegram y el correo fallan, esa alerta no se repite (como mucho una vez, no exactamente una vez).
-- La clave es por tick, no por movimiento. Binance y Yadio registran un tick nuevo cada 5 minutos, así que mientras una variación 24h siga sobre el umbral la fuente avisa una vez por hora. Para avisar menos, suba `RATES_ALERT_PCT`.
+- La clave es por día y dirección, no por tick: si la variación pasa de +4 % a +6 % el mismo día no hay segundo aviso; si se da vuelta a -3 % sí. El día siguiente vuelve a avisar si sigue sobre el umbral.
 - El aviso de `/stats` caído usa la bandera `statsDown` de los mismos datos estáticos y tiene los mismos límites.
 
 ## Otros límites

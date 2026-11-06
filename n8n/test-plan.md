@@ -34,7 +34,7 @@ Salida esperada:
 
 | Nodo | Caso | Resultado esperado |
 |---|---|---|
-| Calcular alertas | **válido** | Un ítem con `threshold: 3`, `checked: 5`, `alerts` = `binance_p2p` (price 650.5, pct 4.2, from_price 624.25, from_date `2026-11-05T10:00:00-04:00`) y `yadio` (pct -3), `duplicates: ["binance_p2p\|2026-11-06T10:00:00-04:00"]` (repetición dentro de la corrida), `invalid: []`. `message` contiene `650,50`, `+4,20 %`, `624,25` y termina en `Ver: <RATES_BASE_URL>/` (o `Ver: /` sin la variable) |
+| Calcular alertas | **válido** | Un ítem con `threshold: 3`, `checked: 5`, `alerts` = `binance_p2p` (price 650.5, pct 4.2, from_price 624.25, from_date `2026-11-05T10:00:00-04:00`) y `yadio` (pct -3), `duplicates: ["binance_p2p\|2026-11-06\|+"]` (repetición dentro de la corrida), `invalid: []`. `message` contiene `650,50`, `+4,20 %`, `624,25` y termina en `Ver: <RATES_PUBLIC_URL>/` (`<RATES_BASE_URL>/` sin ella, `Ver: /` sin ninguna) |
 | Calcular alertas (segundo tick) | **duplicado** (misma respuesta otra vez) | `alerts: []`, `duplicates` con 3 claves: las dos alertas ya enviadas y la repetición. Muestra que los datos estáticos se comparten entre nodos dentro de la ejecución |
 | Calcular alertas (malformado) | **inválido** (`{"detail": ...}` y un `bcv` con `latest: "580,1"` y sin `change`) | Sale por la salida de error, que llega a "Rechazado (esperado)" con el mensaje `Respuesta de /stats malformada: 2 entradas inválidas, ninguna válida`. "Aceptado (no esperado)" no se ejecuta |
 
@@ -69,8 +69,8 @@ Requiere el flujo **activo**, porque los datos estáticos solo se guardan en eje
 
 1. Prepare la API con datos donde al menos una fuente supere el umbral en 24 h (por ejemplo `seed_demo` y comprobar con `GET /stats`) y arránquela con `RATES_COLLECTOR_ENABLED=false` para que no entren ticks nuevos. Pin data no sirve aquí: no se aplica en ejecuciones de producción.
 2. Active el flujo y espere a que "Cada hora" dispare (minuto 5). Esperado: una alerta por cada fuente sobre el umbral.
-3. Espere el siguiente disparo sin que entren ticks nuevos. Esperado: la ejecución termina en "Sin alertas"; en "Calcular alertas", `alerts: []` y las claves en `duplicates`. **Una sola alerta por tick.**
-4. Inserte un tick nuevo de esa fuente (`POST /collect` o `/import`) que mantenga la variación sobre el umbral. Esperado en el siguiente disparo: una alerta nueva, porque cambió `latest_date`.
+3. Espere el siguiente disparo sin que entren ticks nuevos. Esperado: la ejecución termina en "Sin alertas"; en "Calcular alertas", `alerts: []` y las claves en `duplicates`. **Una sola alerta por fuente, día y dirección.**
+4. Inserte un tick nuevo de esa fuente (`POST /collect` o `/import`) que mantenga la variación sobre el umbral. Esperado en el siguiente disparo: ninguna alerta nueva, porque la clave `source|día|signo` es la misma. Con una variación de signo contrario sobre el umbral, o al día local siguiente, sí llega una alerta nueva.
 5. Para el aviso de caída: detenga la API durante dos disparos. Esperado: un solo aviso. Levántela, espere un disparo bueno, vuelva a detenerla: un aviso nuevo.
 
 Para no esperar a la hora, puede cambiar temporalmente el intervalo de "Cada hora" a minutos en la instancia de prueba.
