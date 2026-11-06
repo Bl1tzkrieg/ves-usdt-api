@@ -64,3 +64,25 @@ class ImportResult(BaseModel):
     duplicates: int
     rejected: int
     rejected_sample: list[dict] = []
+
+
+class Change(BaseModel):
+    abs: float
+    pct: float
+    from_price: float
+    from_date: str
+
+
+class SourceStats(BaseModel):
+    source: str
+    label: str
+    unit: str
+    latest: float
+    latest_date: str
+    change: dict[str, Change | None]
+    spread_vs_reference_pct: float | None = None
+
+
+class DailyChange(BaseModel):
+    date: str
+    pct: float

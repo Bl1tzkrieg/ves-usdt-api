@@ -121,6 +121,12 @@ curl -o tasas.csv "localhost:8000/api/v1/rates/history.csv?days=1095&sources=bin
 
 `GET /stream` es un stream SSE. Cada `every` segundos (defecto 15, entre 2 y 3600) revisa el último tick de `sources` y emite `event: rates` solo con las fuentes que cambiaron; si nada cambió manda un keepalive.
 
+### Resumen
+
+`GET /stats` devuelve, por fuente con datos (`sources` filtra, vacío = todas), el último precio y la variación `24h`, `7d` y `30d` (`abs`, `pct`, `from_price`, `from_date`). El precio de comparación es el último tick con `ts <= último - N días`; si no hay historia tan antigua la ventana vale `null`. `spread_vs_reference_pct` es `(último / último_referencia - 1) * 100` contra `reference` (defecto `bcv`), y `null` para la propia referencia o si ella no tiene datos.
+
+`GET /daily-change?source=&days=` (defecto `binance_p2p` y 30 días) da `[{date, pct}]`: variación cierre-a-cierre entre días consecutivos con datos, sobre velas diarias sin relleno.
+
 ### Escritura, con clave
 
 `POST /collect` y `POST /import` exigen la cabecera `X-API-Key` igual a `RATES_API_KEY`. Sin clave configurada responden 503; con una clave ausente o distinta, 401.
