@@ -49,7 +49,12 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware, allow_origins=settings.cors_origins, allow_methods=["*"], allow_headers=["*"]
 )
-app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(
+    SecurityHeadersMiddleware,
+    exempt_paths={
+        p for p in (app.docs_url, app.redoc_url, app.swagger_ui_oauth2_redirect_url, app.openapi_url) if p
+    },
+)
 app.include_router(rates.router)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hmac
+from collections.abc import Collection
 
 from fastapi import Header, HTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -28,21 +29,31 @@ def require_api_key(x_api_key: str | None = Header(None, alias="X-API-Key")) -> 
         raise HTTPException(401, "API key inválida o ausente")
 
 
-class SecurityHeadersMiddleware:
-    """ASGI puro: añade cabeceras a la respuesta sin almacenar el cuerpo (compatible con SSE)."""
+_CSP = b"content-security-policy"
+_HEADERS_WITHOUT_CSP = [h for h in SECURITY_HEADERS if h[0] != _CSP]
 
-    def __init__(self, app: ASGIApp) -> None:
+
+class SecurityHeadersMiddleware:
+    """ASGI puro: añade cabeceras a la respuesta sin almacenar el cuerpo (compatible con SSE).
+
+    En `exempt_paths` (Swagger/ReDoc, que cargan del CDN y usan script inline) se omite la CSP.
+    """
+
+    def __init__(self, app: ASGIApp, exempt_paths: Collection[str] = ()) -> None:
         self.app = app
+        self.exempt_paths = frozenset(exempt_paths)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
 
+        headers = _HEADERS_WITHOUT_CSP if scope["path"] in self.exempt_paths else SECURITY_HEADERS
+
         async def send_with_headers(message: Message) -> None:
             if message["type"] == "http.response.start":
                 present = {k.lower() for k, _ in message.get("headers", [])}
-                message["headers"] = [*message.get("headers", []), *(h for h in SECURITY_HEADERS if h[0] not in present)]
+                message["headers"] = [*message.get("headers", []), *(h for h in headers if h[0] not in present)]
             await send(message)
 
         await self.app(scope, receive, send_with_headers)

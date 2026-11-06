@@ -124,3 +124,19 @@ def test_concurrent_collect_raises_in_progress(monkeypatch):
 @pytest.mark.parametrize("path", ["/api/v1/rates/latest", "/api/v1/rates/sources", "/api/v1/rates/collector", "/"])
 def test_read_paths_open_without_key(client, path):
     assert TestClient(app).get(path).status_code == 200
+
+
+@pytest.mark.parametrize("path", ["/docs", "/redoc", "/docs/oauth2-redirect", "/openapi.json"])
+def test_docs_paths_skip_csp_but_keep_other_headers(client, path):
+    r = client.get(path)
+    assert r.status_code == 200
+    assert "content-security-policy" not in r.headers
+    assert r.headers["x-content-type-options"] == "nosniff"
+    assert r.headers["x-frame-options"] == "DENY"
+    assert r.headers["referrer-policy"] == "no-referrer"
+
+
+def test_index_keeps_full_csp(client):
+    r = client.get("/")
+    assert r.headers["content-security-policy"].startswith("default-src 'self'")
+    assert r.headers["x-content-type-options"] == "nosniff"
