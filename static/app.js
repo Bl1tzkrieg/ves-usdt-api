@@ -564,7 +564,7 @@ function renderHero(error = null) {
     : '';
 }
 
-// --- Exportaciones. XLSX y PDF llegan en la fase D: se activan solos cuando el servidor los sirve.
+// --- Exportaciones. XLSX y PDF se activan solos cuando el servidor los sirve (ver enablePendingExports).
 const xlsxUrl = () => `${API}/history.xlsx?${params({ layout: 'wide', value: $('value').value })}`;
 function pdfUrl() {
   const ref = $('end').value || new Date().toLocaleDateString('en-CA', { timeZone: TZ });

@@ -148,7 +148,7 @@ Informe de un mes en PDF, para imprimir o adjuntar.
 
 Trae el mes en español ("Octubre 2026"), las fuentes y la hora de generación en UTC-4; una tabla resumen por fuente con apertura, cierre, mínimo, máximo, variación del mes y brecha media contra el BCV; un gráfico de cierres diarios con la paleta de la página; y la tabla diaria de cierres, una columna por fuente.
 
-Todo sale de velas diarias con `fill=forward`, así que los fines de semana del BCV repiten la última tasa oficial. En la tabla diaria esos valores van en gris cursiva, y apertura, cierre, mínimo y máximo solo usan días con cotización propia. La brecha media compara cada día con cotización propia contra el BCV vigente ese día, aunque el BCV no esté entre las fuentes pedidas. El mes en curso se corta en el día de hoy. Un mes sin datos devuelve igual un PDF que lo dice.
+Todo sale de velas diarias con `fill=forward`, así que los fines de semana del BCV repiten la última tasa oficial. En la tabla diaria esos valores van en gris cursiva; el gráfico, en cambio, corta cada línea en el último dato real, así que una fuente que dejó de cotizar a mitad de mes no aparece plana hasta fin de mes. Apertura, cierre, mínimo y máximo solo usan días con cotización propia. La brecha media compara cada día con cotización propia contra el BCV vigente ese día, aunque el BCV no esté entre las fuentes pedidas. El mes en curso se corta en el día de hoy. Un mes sin datos devuelve igual un PDF que lo dice.
 
 ```bash
 curl -o informe.pdf "localhost:8000/api/v1/rates/report.pdf?month=2026-10&sources=binance_p2p,bcv"

@@ -12,6 +12,7 @@ from app import aggregation as agg
 from app.pdf_report import (
     SourceStats,
     build_monthly_report,
+    chart_points,
     month_bounds,
     parse_month,
     summarize,
@@ -50,6 +51,7 @@ def test_pdf_report_month_with_data(client):
     i = tokens.index("06/01/2025")
     assert tokens[i + 1 : i + 3] == ["105,20", "94,00"]
     # Solo hay datos hasta el día 10: la tabla diaria sigue con el último valor, sin huecos raros
+    # La tabla diaria rellena hasta fin de mes (en gris cursiva); el gráfico se corta en el último dato real
     assert "31/01/2025" in tokens
 
 
@@ -161,3 +163,18 @@ def test_build_monthly_report_without_data_mentions_month_and_dashes():
     assert content.startswith(b"%PDF")
     text = _text(content)
     assert "Octubre 2026" in text and "No hay datos" in text
+
+
+def test_chart_points_drop_trailing_fill_but_keep_interior_gaps():
+    stops_early = [
+        _candle(1, 1, 1, 1, 10),
+        _candle(2, 1, 1, 1, 10, filled=True),  # hueco interior (fin de semana): se conserva
+        _candle(3, 1, 1, 1, 12),
+        _candle(4, 1, 1, 1, 12, filled=True),  # cola rellena: la fuente dejó de cotizar
+        _candle(5, 1, 1, 1, 12, filled=True),
+    ]
+    only_fill = [_candle(1, 1, 1, 1, 5, filled=True)]
+    points = chart_points({"yadio": stops_early, "bcv": only_fill})
+    assert [x.day for x, _ in points["yadio"]] == [1, 2, 3]
+    assert [y for _, y in points["yadio"]] == [10, 10, 12]
+    assert points["bcv"] == []

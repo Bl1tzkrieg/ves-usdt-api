@@ -175,14 +175,30 @@ def _short_label(name: str) -> str:
 # ------------------------------------------------------------------ gráfico
 
 
+def chart_points(data: Mapping[str, Sequence[dict[str, Any]]]) -> dict[str, list[tuple[datetime, float]]]:
+    """(fecha local sin zona, cierre) por fuente para el gráfico.
+
+    Se descarta la cola de velas rellenas: si una fuente dejó de cotizar a mitad de mes, la línea termina
+    en su último dato real en vez de afirmar precios que nunca se observaron. Los huecos interiores
+    (fines de semana del BCV) se mantienen para que la línea siga continua.
+    """
+    out: dict[str, list[tuple[datetime, float]]] = {}
+    for name, candles in data.items():
+        last_real = max((i for i, c in enumerate(candles) if not c["filled"]), default=-1)
+        out[name] = [
+            (agg.to_local(c["t"]).replace(tzinfo=None), c["close"])
+            for c in candles[: last_real + 1]
+            if c["close"] is not None
+        ]
+    return out
+
+
 def _chart_png(data: Mapping[str, Sequence[dict[str, Any]]], month: date) -> bytes:
     """Cierres diarios de cada fuente, un solo eje Y, como PNG en memoria."""
     fig = Figure(figsize=(7.2, 3.4), dpi=200)
     FigureCanvasAgg(fig)
     ax = fig.add_subplot()
-    for name, candles in data.items():
-        points = [(agg.to_local(c["t"]).replace(tzinfo=None), c["close"]) for c in candles]
-        points = [(x, y) for x, y in points if y is not None]
+    for name, points in chart_points(data).items():
         if not points:
             continue
         xs, ys = zip(*points, strict=True)
